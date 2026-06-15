@@ -1,0 +1,23 @@
+---
+description: RemoteCode project conventions
+alwaysApply: true
+---
+
+# RemoteCode
+
+RemoteCode is split into **server apps** and **client apps**.
+
+## Server apps
+
+IDE integrations on the developer machine:
+
+- `cursor/` — Cursor plugin (active)
+- `claude/` — Claude plugin (reserved)
+
+## Client apps
+
+End-user device apps that connect to iCloud or Google Drive:
+
+- `mobile/` — React Native (Android + iOS)
+- `iwatch/` — watchOS app with widget
+- `garmin/` — reserved

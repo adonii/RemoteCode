@@ -1,0 +1,98 @@
+{
+  "name": "remotecode",
+  "displayName": "RemoteCode",
+  "description": "RemoteCode Cursor server app with iCloud or Google Drive connection",
+  "version": "0.7.31",
+  "publisher": "remotecode",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "remotecode",
+    "icloud",
+    "google-drive",
+    "cursor-plugin"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adonii/RemoteCode.git"
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:remotecode.cloudConnection"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "remotecode",
+          "title": "RemoteCode",
+          "icon": "assets/activity-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "remotecode": [
+        {
+          "id": "remotecode.cloudConnection",
+          "name": "Cloud Connection",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "remotecode.openCloudSettings",
+        "title": "RemoteCode: Open Cloud Settings",
+        "category": "RemoteCode",
+        "icon": "$(cloud)"
+      },
+      {
+        "command": "remotecode.connectCloud",
+        "title": "RemoteCode: Connect Cloud Storage",
+        "category": "RemoteCode",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "remotecode.logoutCloud",
+        "title": "RemoteCode: Log Out of Cloud Storage",
+        "category": "RemoteCode",
+        "icon": "$(sign-out)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "remotecode.openCloudSettings"
+        },
+        {
+          "command": "remotecode.connectCloud"
+        },
+        {
+          "command": "remotecode.logoutCloud"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "sync-shared": "node scripts/sync-shared.mjs",
+    "vscode:prepublish": "npm run sync-shared",
+    "package": "npm run sync-shared && vsce package",
+    "package:install": "npm run package && cursor --install-extension remotecode-*.vsix"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "1.10.0",
+    "@connectrpc/connect": "^1.6.1",
+    "@connectrpc/connect-node": "^1.6.1",
+    "@cursor/sdk": "^1.0.18",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.7.1"
+  }
+}

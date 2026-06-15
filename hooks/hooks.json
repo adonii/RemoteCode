@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "./hooks/ensure-project-cloud-folder.mjs"
+      },
+      {
+        "command": "./hooks/start-task-monitor.mjs"
+      },
+      {
+        "command": "./hooks/notify-pending-tasks.mjs"
+      }
+    ],
+    "stop": [
+      {
+        "command": "./hooks/update-machine-account.mjs"
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "./hooks/ensure-project-cloud-folder.mjs"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "./hooks/gate-stop-request.mjs"
+      },
+      {
+        "command": "./hooks/gate-tool-approval.mjs"
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "./hooks/gate-stop-request.mjs"
+      },
+      {
+        "command": "./hooks/gate-tool-approval.mjs"
+      },
+      {
+        "command": "./hooks/require-cloud-connection.sh",
+        "failClosed": true
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "./hooks/gate-stop-request.mjs"
+      },
+      {
+        "command": "./hooks/require-cloud-connection.sh",
+        "failClosed": true
+      }
+    ]
+  }
+}

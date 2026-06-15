@@ -1,0 +1,14 @@
+{
+  "name": "RemoteCode",
+  "version": "0.4.4",
+  "description": "RemoteCode Cursor server app with iCloud or Google Drive connection",
+  "author": {
+    "name": "RemoteCode"
+  },
+  "license": "MIT",
+  "keywords": ["remotecode", "icloud", "google-drive"],
+  "logo": "assets/logo.png",
+  "rules": "./rules/",
+  "commands": "./commands/",
+  "hooks": "./hooks/hooks.json"
+}

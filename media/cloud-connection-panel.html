@@ -1,0 +1,1647 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; trusted-types remotecodeHtml default; require-trusted-types-for 'script';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RemoteCode Cloud Connection</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 16px;
+        font-family: var(--vscode-font-family);
+        font-size: var(--vscode-font-size);
+        color: var(--vscode-foreground);
+        background: var(--vscode-sideBar-background);
+      }
+
+      h1 {
+        margin: 0 0 4px;
+        font-size: 1.1em;
+        font-weight: 600;
+      }
+
+      .subtitle {
+        margin: 0 0 16px;
+        color: var(--vscode-descriptionForeground);
+        line-height: 1.4;
+      }
+
+      .card {
+        border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
+        border-radius: 6px;
+        padding: 12px;
+        margin-bottom: 12px;
+        background: var(--vscode-editor-background);
+      }
+
+      .card h2 {
+        margin: 0 0 8px;
+        font-size: 0.95em;
+        font-weight: 600;
+      }
+
+      .status-pill {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.85em;
+        font-weight: 600;
+      }
+
+      .status-pill.connected {
+        color: var(--vscode-testing-iconPassed);
+        background: color-mix(in srgb, var(--vscode-testing-iconPassed) 18%, transparent);
+      }
+
+      .status-pill.disconnected {
+        color: var(--vscode-errorForeground);
+        background: color-mix(in srgb, var(--vscode-errorForeground) 18%, transparent);
+      }
+
+      .detail {
+        margin: 8px 0 0;
+        color: var(--vscode-descriptionForeground);
+        line-height: 1.45;
+      }
+
+      label {
+        display: block;
+        margin: 10px 0 4px;
+        font-size: 0.9em;
+      }
+
+      .checkbox-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin: 0;
+        cursor: pointer;
+        font-size: 0.9em;
+      }
+
+      .checkbox-row input[type='checkbox'] {
+        width: auto;
+        margin: 2px 0 0;
+        flex-shrink: 0;
+        cursor: pointer;
+      }
+
+      .field-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin: 10px 0 0;
+        font-size: 0.9em;
+      }
+
+      .field-row input[type='number'] {
+        width: 72px;
+        flex-shrink: 0;
+      }
+
+      .field-row input[type='range'] {
+        width: 160px;
+        flex-shrink: 0;
+      }
+
+      input {
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid var(--vscode-input-border, transparent);
+        border-radius: 4px;
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        font: inherit;
+      }
+
+      input:focus {
+        outline: 1px solid var(--vscode-focusBorder);
+      }
+
+      .hint {
+        margin: 6px 0 0;
+        font-size: 0.85em;
+        color: var(--vscode-descriptionForeground);
+        line-height: 1.4;
+      }
+
+      .actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        border: none;
+        border-radius: 4px;
+        padding: 6px 12px;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      button.primary {
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+      }
+
+      button.primary:hover {
+        background: var(--vscode-button-hoverBackground);
+      }
+
+      button.secondary {
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
+      }
+
+      button.secondary:hover {
+        background: var(--vscode-button-secondaryHoverBackground);
+      }
+
+      button:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+
+      .error {
+        margin-top: 10px;
+        padding: 8px 10px;
+        border-radius: 4px;
+        background: color-mix(in srgb, var(--vscode-errorForeground) 12%, transparent);
+        color: var(--vscode-errorForeground);
+        font-size: 0.9em;
+        line-height: 1.4;
+        display: none;
+      }
+
+      .error.visible {
+        display: block;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .path {
+        margin-top: 8px;
+        padding: 8px;
+        border-radius: 4px;
+        background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.15));
+        font-family: var(--vscode-editor-font-family, monospace);
+        font-size: 0.85em;
+        line-height: 1.45;
+        word-break: break-word;
+      }
+
+      .conversions {
+        margin-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .conversion-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .conversion-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        align-items: baseline;
+      }
+
+      .conversion-label {
+        font-size: 0.9em;
+        font-weight: 600;
+        color: var(--vscode-foreground);
+      }
+
+      .conversion-detail {
+        font-size: 0.8em;
+        color: var(--vscode-descriptionForeground);
+        word-break: break-word;
+      }
+
+      .conversion-phase {
+        font-size: 0.8em;
+        color: var(--vscode-descriptionForeground);
+        text-transform: capitalize;
+      }
+
+      .progress-track {
+        width: 100%;
+        height: 8px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+      }
+
+      .progress-bar {
+        height: 100%;
+        border-radius: 999px;
+        background: var(--vscode-progressBar-background, var(--vscode-button-background));
+        transition: width 0.35s ease;
+      }
+
+      .progress-bar.indeterminate {
+        width: 35% !important;
+        animation: conversion-indeterminate 1.2s ease-in-out infinite;
+      }
+
+      .conversion-error {
+        margin-top: 6px;
+        font-size: 11px;
+        color: var(--vscode-errorForeground, #f48771);
+        line-height: 1.4;
+      }
+
+      .conversion-item.failed .progress-bar {
+        background: var(--vscode-errorForeground, #f48771);
+      }
+
+      .task-activity,
+      .api-debug {
+        margin-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .task-item,
+      .api-item {
+        border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
+        border-radius: 6px;
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .task-item.running,
+      .task-item.stopping {
+        border-color: color-mix(in srgb, var(--vscode-progressBar-background, var(--vscode-button-background)) 45%, transparent);
+      }
+
+      .task-header,
+      .api-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        align-items: baseline;
+      }
+
+      .task-title,
+      .api-title {
+        font-size: 0.9em;
+        font-weight: 600;
+      }
+
+      .task-badge,
+      .api-badge {
+        font-size: 0.75em;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: var(--vscode-descriptionForeground);
+      }
+
+      .task-detail,
+      .api-detail,
+      .task-remaining {
+        font-size: 0.82em;
+        color: var(--vscode-descriptionForeground);
+        line-height: 1.45;
+        word-break: break-word;
+      }
+
+      .task-remaining ul {
+        margin: 4px 0 0;
+        padding-left: 18px;
+      }
+
+      .api-body {
+        margin: 0;
+        padding: 8px;
+        border-radius: 4px;
+        background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.15));
+        font-family: var(--vscode-editor-font-family, monospace);
+        font-size: 0.75em;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 160px;
+        overflow: auto;
+      }
+
+      .section-label {
+        margin: 12px 0 0;
+        font-size: 0.85em;
+        font-weight: 600;
+        color: var(--vscode-foreground);
+      }
+
+      .queue-sections {
+        margin-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .queue-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .queue-section-header {
+        font-size: 0.82em;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--vscode-descriptionForeground);
+      }
+
+      .queue-section-items {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .queue-item {
+        border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
+        border-radius: 6px;
+        padding: 10px;
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+      }
+
+      .queue-item.running,
+      .queue-item.stopping,
+      .queue-item.stop {
+        border-color: color-mix(
+          in srgb,
+          var(--vscode-progressBar-background, var(--vscode-button-background)) 45%,
+          transparent
+        );
+      }
+
+      .queue-item.fail,
+      .queue-item.stopped.failed {
+        border-color: color-mix(
+          in srgb,
+          var(--vscode-errorForeground, #f48771) 45%,
+          transparent
+        );
+      }
+
+      .queue-item-rank {
+        flex-shrink: 0;
+        width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.72em;
+        font-weight: 700;
+        color: var(--vscode-button-foreground);
+        background: var(--vscode-button-secondaryBackground);
+      }
+
+      .queue-item-rank.next {
+        background: var(--vscode-button-background);
+      }
+
+      .queue-item-icon {
+        flex-shrink: 0;
+        width: 22px;
+        text-align: center;
+        font-size: 0.9em;
+        line-height: 22px;
+        color: var(--vscode-descriptionForeground);
+      }
+
+      .queue-item-body {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .queue-item-title-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        align-items: baseline;
+      }
+
+      .queue-item-title {
+        font-size: 0.9em;
+        font-weight: 600;
+        word-break: break-word;
+      }
+
+      .queue-item-badge {
+        flex-shrink: 0;
+        font-size: 0.72em;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: var(--vscode-descriptionForeground);
+      }
+
+      .queue-item-badge.next {
+        color: var(--vscode-button-background);
+      }
+
+      .queue-item-summary {
+        font-size: 0.82em;
+        color: var(--vscode-descriptionForeground);
+        line-height: 1.45;
+        word-break: break-word;
+      }
+
+      .queue-item-fail-preview {
+        font-size: 0.82em;
+        color: var(--vscode-errorForeground, #f48771);
+        line-height: 1.45;
+        word-break: break-word;
+      }
+
+      .queue-item-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 6px;
+      }
+
+      .queue-item-action {
+        appearance: none;
+        border: 1px solid var(--vscode-button-border, transparent);
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.78em;
+        font-weight: 600;
+        padding: 4px 10px;
+      }
+
+      .queue-item-action.primary {
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+      }
+
+      .queue-item-action.secondary {
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+      }
+
+      .queue-item-action:disabled {
+        cursor: default;
+        opacity: 0.6;
+      }
+
+      .queue-item-request,
+      .task-request-preview {
+        font-size: 0.82em;
+        color: var(--vscode-foreground);
+        line-height: 1.45;
+        word-break: break-word;
+        opacity: 0.92;
+      }
+
+      .queue-item-progress {
+        margin-top: 4px;
+      }
+
+      .queue-idle {
+        margin-top: 12px;
+        font-size: 0.85em;
+        color: var(--vscode-descriptionForeground);
+        line-height: 1.45;
+      }
+
+      .audio-wave-icon {
+        display: inline-flex;
+        align-items: flex-end;
+        gap: 2px;
+        width: 22px;
+        height: 18px;
+        flex-shrink: 0;
+      }
+
+      .audio-wave-icon span {
+        display: block;
+        width: 3px;
+        border-radius: 999px;
+        background: var(--vscode-progressBar-background, var(--vscode-button-background));
+        animation: audio-wave 1s ease-in-out infinite;
+      }
+
+      .audio-wave-icon span:nth-child(1) {
+        height: 8px;
+        animation-delay: 0s;
+      }
+
+      .audio-wave-icon span:nth-child(2) {
+        height: 14px;
+        animation-delay: 0.15s;
+      }
+
+      .audio-wave-icon span:nth-child(3) {
+        height: 10px;
+        animation-delay: 0.3s;
+      }
+
+      @keyframes audio-wave {
+        0%,
+        100% {
+          transform: scaleY(0.45);
+          opacity: 0.55;
+        }
+        50% {
+          transform: scaleY(1);
+          opacity: 1;
+        }
+      }
+
+      @keyframes conversion-indeterminate {
+        0% {
+          transform: translateX(-120%);
+        }
+        100% {
+          transform: translateX(320%);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Cloud connection</h1>
+    <p class="subtitle">
+      Connect one cloud provider so RemoteCode can sync project folders to your devices.
+    </p>
+
+    <section class="card" id="settings-card">
+      <h2>Settings</h2>
+      <label class="checkbox-row" for="prevent-sleep">
+        <input id="prevent-sleep" type="checkbox" />
+        <span>Prevent machine from sleeping</span>
+      </label>
+      <p class="hint" id="prevent-sleep-hint">
+        Keeps this Mac awake while Cursor is open and RemoteCode is running.
+      </p>
+      <label class="field-row" for="max-parallel-tasks">
+        <span>Max tasks running in parallel</span>
+        <input id="max-parallel-tasks" type="number" min="1" max="20" step="1" />
+      </label>
+      <p class="hint" id="max-parallel-hint">
+        RemoteCode auto-starts queued tasks up to this many at once.
+      </p>
+      <label class="checkbox-row" for="inject-active-context">
+        <input id="inject-active-context" type="checkbox" />
+        <span>Use active tab conversation as task context</span>
+      </label>
+      <label class="checkbox-row" id="accumulate-row" for="accumulate-task-history">
+        <input id="accumulate-task-history" type="checkbox" />
+        <span>Also include history from completed tasks</span>
+      </label>
+      <label class="field-row" id="context-token-row" for="context-token-limit">
+        <span>Context token budget</span>
+        <input id="context-token-limit" type="range" min="0" max="60000" step="1000" />
+      </label>
+      <p class="hint" id="context-token-hint">
+        Caps how much prior context is injected per task (0 disables).
+      </p>
+    </section>
+
+    <section class="card" id="connection-card">
+      <h2>Connection</h2>
+      <span class="status-pill disconnected" id="status-pill">Not connected</span>
+      <p class="detail" id="status-detail">
+        RemoteCode stays disabled until iCloud or Google Drive is connected.
+      </p>
+      <div class="actions hidden" id="connection-actions">
+        <button class="secondary" id="logout-btn" type="button">Log out</button>
+      </div>
+    </section>
+
+    <section class="card hidden" id="folders-card">
+      <h2>iCloud folders</h2>
+      <p class="detail" id="folders-intro">
+        On connect and startup, RemoteCode provisions a cloud folder for each open workspace project and writes account.json with Cursor usage stats.
+      </p>
+      <div class="path" id="folders-path"></div>
+      <p class="detail" id="folders-status"></p>
+      <div class="queue-sections hidden" id="queue-sections"></div>
+      <p class="queue-idle hidden" id="queue-idle"></p>
+      <div class="conversions hidden" id="conversions-panel"></div>
+      <div class="task-activity hidden" id="task-activity-panel"></div>
+      <div class="api-debug hidden" id="api-debug-panel"></div>
+      <div class="actions">
+        <button class="primary" id="provision-btn" type="button">Sync folders &amp; usage</button>
+        <button class="secondary" id="reveal-btn" type="button">Show in Finder</button>
+        <button class="secondary" id="refresh-debug-btn" type="button">Refresh task debug</button>
+      </div>
+    </section>
+
+    <section class="card" id="icloud-card">
+      <h2>iCloud</h2>
+      <p class="hint" id="icloud-hint">
+        macOS only. Sign in to iCloud in System Settings and enable iCloud Drive first.
+      </p>
+      <label for="icloud-label">Account label (email or name)</label>
+      <input id="icloud-label" type="text" placeholder="you@icloud.com" autocomplete="email" />
+      <div class="actions">
+        <button class="primary" id="icloud-connect-btn" type="button">Connect iCloud</button>
+      </div>
+    </section>
+
+    <section class="card" id="google-card">
+      <h2>Google Drive</h2>
+      <p class="hint">
+        Use the desktop sync folder, or paste an access token for API access.
+      </p>
+      <label for="google-email">Google account email</label>
+      <input id="google-email" type="email" placeholder="you@gmail.com" autocomplete="email" />
+      <label for="google-token">Access token (optional)</label>
+      <input id="google-token" type="password" placeholder="Optional Drive API token" autocomplete="off" />
+      <div class="actions">
+        <button class="primary" id="google-connect-btn" type="button">Connect Google Drive</button>
+      </div>
+    </section>
+
+    <p class="error" id="error"></p>
+
+    <script>
+      const vscode = acquireVsCodeApi();
+
+      /** @type {{ createHTML: (input: string) => unknown } | null} */
+      let htmlTrustedPolicy = null;
+      if (typeof trustedTypes !== 'undefined' && trustedTypes.createPolicy) {
+        try {
+          htmlTrustedPolicy = trustedTypes.createPolicy('remotecodeHtml', {
+            createHTML: input => input,
+          });
+        } catch {
+          try {
+            htmlTrustedPolicy = trustedTypes.createPolicy('default', {
+              createHTML: input => input,
+            });
+          } catch (error) {
+            console.warn('RemoteCode: unable to create HTML trusted type policy', error);
+          }
+        }
+      }
+
+      function toTrustedHtml(html) {
+        if (htmlTrustedPolicy) {
+          return htmlTrustedPolicy.createHTML(html);
+        }
+        return html;
+      }
+
+      function setInnerHTML(element, html) {
+        element.innerHTML = toTrustedHtml(html);
+      }
+
+      function insertAdjacentTrustedHTML(element, position, html) {
+        element.insertAdjacentHTML(position, toTrustedHtml(html));
+      }
+
+      window.remoteCodeQueueAction =
+        window.remoteCodeQueueAction ??
+        function remoteCodeQueueAction(event) {
+          const button = event.target.closest('[data-action]');
+          if (!(button instanceof HTMLButtonElement) || button.disabled) {
+            return;
+          }
+
+          const action = button.dataset.action;
+          const projectKey = button.dataset.projectKey;
+          const taskFolderName = button.dataset.taskFolder;
+          if (!action || !projectKey || !taskFolderName) {
+            return;
+          }
+
+          const actionKey = `${action}:${projectKey}:${taskFolderName}`;
+          if (window.__remoteCodeTaskActionInFlight === actionKey) {
+            return;
+          }
+          window.__remoteCodeTaskActionInFlight = actionKey;
+
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+
+          showError('');
+          setBusy(true);
+          vscode.postMessage({
+            type: action,
+            projectKey,
+            taskFolderName,
+          });
+        };
+
+      const statusPill = document.getElementById('status-pill');
+      const statusDetail = document.getElementById('status-detail');
+      const connectionActions = document.getElementById('connection-actions');
+      const icloudCard = document.getElementById('icloud-card');
+      const googleCard = document.getElementById('google-card');
+      const icloudHint = document.getElementById('icloud-hint');
+      const icloudLabel = document.getElementById('icloud-label');
+      const googleEmail = document.getElementById('google-email');
+      const googleToken = document.getElementById('google-token');
+      const errorEl = document.getElementById('error');
+      const icloudConnectBtn = document.getElementById('icloud-connect-btn');
+      const googleConnectBtn = document.getElementById('google-connect-btn');
+      const logoutBtn = document.getElementById('logout-btn');
+      const foldersCard = document.getElementById('folders-card');
+      const foldersPath = document.getElementById('folders-path');
+      const foldersStatus = document.getElementById('folders-status');
+      const queueSections = document.getElementById('queue-sections');
+      const queueIdle = document.getElementById('queue-idle');
+      const conversionsPanel = document.getElementById('conversions-panel');
+      const taskActivityPanel = document.getElementById('task-activity-panel');
+      const apiDebugPanel = document.getElementById('api-debug-panel');
+      const provisionBtn = document.getElementById('provision-btn');
+      const revealBtn = document.getElementById('reveal-btn');
+      const refreshDebugBtn = document.getElementById('refresh-debug-btn');
+      const preventSleepCheckbox = document.getElementById('prevent-sleep');
+      const preventSleepHint = document.getElementById('prevent-sleep-hint');
+      let preventSleepUpdating = false;
+      const maxParallelInput = document.getElementById('max-parallel-tasks');
+      let maxParallelUpdating = false;
+      const injectActiveContextCheckbox = document.getElementById('inject-active-context');
+      const accumulateHistoryCheckbox = document.getElementById('accumulate-task-history');
+      const accumulateRow = document.getElementById('accumulate-row');
+      const contextTokenLimitInput = document.getElementById('context-token-limit');
+      const contextTokenHint = document.getElementById('context-token-hint');
+      const contextTokenRow = document.getElementById('context-token-row');
+      let contextSettingsUpdating = false;
+      let lastConversionsSnapshot = '';
+      let lastTaskActivitySnapshot = '';
+      let lastApiDebugSnapshot = '';
+      let lastKnownConversions = [];
+      let lastKnownTasks = [];
+      let lastKnownApiDebugLog = [];
+      let lastQueueSectionsSnapshot = '';
+      const conversionItemElements = new Map();
+      const taskActivityItemElements = new Map();
+      const apiDebugItemElements = new Map();
+
+      function resolveOptimisticItems(items, lastKnown) {
+        const nextItems = Array.isArray(items) ? items : [];
+        if (nextItems.length > 0) {
+          return nextItems;
+        }
+        return lastKnown.length > 0 ? lastKnown : nextItems;
+      }
+
+      function renderHtmlFragment(html) {
+        const template = document.createElement('template');
+        template.innerHTML = toTrustedHtml(html.trim());
+        return template.content.firstElementChild;
+      }
+
+      function mergeKeyedPanelItems(panel, items, options) {
+        const {itemMap, getKey, renderItemHtml, sectionLabelHtml} = options;
+
+        if (items.length === 0) {
+          panel.classList.add('hidden');
+          setInnerHTML(panel, '');
+          itemMap.clear();
+          return;
+        }
+
+        panel.classList.remove('hidden');
+
+        if (sectionLabelHtml && !panel.querySelector('.section-label')) {
+          insertAdjacentTrustedHTML(panel, 'afterbegin', sectionLabelHtml);
+        }
+
+        const nextKeys = new Set();
+        for (const item of items) {
+          const key = getKey(item);
+          nextKeys.add(key);
+          const snapshot = JSON.stringify(item);
+          const tracked = itemMap.get(key);
+          if (tracked?.snapshot === snapshot) {
+            continue;
+          }
+
+          const element = renderHtmlFragment(renderItemHtml(item));
+          if (!element) {
+            continue;
+          }
+
+          if (tracked?.element?.isConnected) {
+            tracked.element.replaceWith(element);
+          } else {
+            panel.appendChild(element);
+          }
+
+          itemMap.set(key, {snapshot, element});
+        }
+
+        for (const [key, tracked] of itemMap) {
+          if (!nextKeys.has(key)) {
+            tracked.element?.remove();
+            itemMap.delete(key);
+          }
+        }
+      }
+
+      function hideDynamicQueuePanels() {
+        queueSections.classList.add('hidden');
+        setInnerHTML(queueSections, '');
+        queueIdle.classList.add('hidden');
+        queueIdle.textContent = '';
+        lastQueueSectionsSnapshot = '';
+        conversionsPanel.classList.add('hidden');
+        setInnerHTML(conversionsPanel, '');
+        taskActivityPanel.classList.add('hidden');
+        setInnerHTML(taskActivityPanel, '');
+        apiDebugPanel.classList.add('hidden');
+        setInnerHTML(apiDebugPanel, '');
+        lastConversionsSnapshot = '';
+        lastTaskActivitySnapshot = '';
+        lastApiDebugSnapshot = '';
+        lastKnownConversions = [];
+        lastKnownTasks = [];
+        lastKnownApiDebugLog = [];
+        conversionItemElements.clear();
+        taskActivityItemElements.clear();
+      }
+
+      function hideAllFolderPanels() {
+        foldersCard.classList.add('hidden');
+        hideDynamicQueuePanels();
+      }
+
+      function setBusy(busy) {
+        icloudConnectBtn.disabled = busy;
+        googleConnectBtn.disabled = busy;
+        logoutBtn.disabled = busy;
+        provisionBtn.disabled = busy;
+        revealBtn.disabled = busy;
+        refreshDebugBtn.disabled = busy;
+        foldersCard.querySelectorAll('[data-action]').forEach(button => {
+          button.disabled = busy;
+        });
+        if (!busy) {
+          window.__remoteCodeTaskActionInFlight = null;
+        }
+      }
+
+      function showError(message) {
+        if (!message) {
+          errorEl.textContent = '';
+          errorEl.classList.remove('visible');
+          return;
+        }
+        errorEl.textContent = message;
+        errorEl.classList.add('visible');
+      }
+
+      function formatConversionPhase(phase) {
+        switch (phase) {
+          case 'downloading':
+          case 'Downloading audio':
+            return 'Downloading audio';
+          case 'transcribing':
+          case 'Transcribing':
+          case 'Uploading audio':
+          case 'Processing transcript':
+          case 'Transcription complete':
+            return String(phase);
+          case 'summarizing':
+          case 'Summarizing':
+            return 'Summarizing';
+          case 'saving':
+          case 'Saving':
+            return 'Saving transcript';
+          case 'starting':
+            return 'Starting';
+          case 'complete':
+            return 'Complete';
+          case 'failed':
+            return 'Failed';
+          default:
+            return String(phase || 'Converting');
+        }
+      }
+
+      function renderConversionItemHtml(conversion) {
+        const failed = conversion.phase === 'failed' || Boolean(conversion.error);
+        const percent = Number.isFinite(conversion.percent) ? conversion.percent : 0;
+        const indeterminate = conversion.indeterminate === true && !failed;
+        const width = indeterminate ? 35 : Math.max(4, Math.min(100, percent));
+        const barClass = indeterminate ? 'progress-bar indeterminate' : 'progress-bar';
+        const detail = conversion.detail
+          ? `<div class="conversion-detail">${conversion.detail}</div>`
+          : '';
+        const backend = conversion.backend
+          ? `<div class="conversion-detail">${conversion.backend}</div>`
+          : '';
+        const phaseText = failed
+          ? 'Failed'
+          : indeterminate
+            ? formatConversionPhase(conversion.phase)
+            : `${formatConversionPhase(conversion.phase)} · ${percent}%`;
+        const error = conversion.error
+          ? `<div class="conversion-error">${conversion.error}</div>`
+          : '';
+
+        return `
+          <div class="conversion-item${failed ? ' failed' : ''}">
+            <div class="conversion-header">
+              <span class="conversion-label">${conversion.label || 'Audio task'}</span>
+              <span class="conversion-phase">${phaseText}</span>
+            </div>
+            ${detail}
+            ${backend}
+            <div class="progress-track">
+              <div class="${barClass}" style="width: ${width}%"></div>
+            </div>
+            ${error}
+          </div>
+        `;
+      }
+
+      function renderConversions(conversions) {
+        const items = resolveOptimisticItems(conversions, lastKnownConversions);
+        const snapshot = JSON.stringify(items);
+        if (snapshot === lastConversionsSnapshot) {
+          return;
+        }
+        lastConversionsSnapshot = snapshot;
+        if (items.length > 0) {
+          lastKnownConversions = items;
+        }
+
+        mergeKeyedPanelItems(conversionsPanel, items, {
+          itemMap: conversionItemElements,
+          getKey: conversion =>
+            conversion.id ||
+            `${conversion.label || 'audio'}:${conversion.detail || conversion.phase || ''}`,
+          renderItemHtml: renderConversionItemHtml,
+        });
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      function formatApiBody(entry) {
+        const parts = [];
+        if (entry.method && entry.url) {
+          parts.push(`${entry.method} ${entry.url}`);
+        }
+        if (entry.requestBody) {
+          parts.push(`Request:\n${typeof entry.requestBody === 'string' ? entry.requestBody : JSON.stringify(entry.requestBody, null, 2)}`);
+        }
+        if (entry.responseStatus != null) {
+          parts.push(`Response: ${entry.responseStatus}`);
+        }
+        if (entry.responseBody) {
+          parts.push(`Body:\n${typeof entry.responseBody === 'string' ? entry.responseBody : JSON.stringify(entry.responseBody, null, 2)}`);
+        }
+        if (entry.detail) {
+          parts.push(String(entry.detail));
+        }
+        if (entry.data) {
+          parts.push(`Data:\n${typeof entry.data === 'string' ? entry.data : JSON.stringify(entry.data, null, 2)}`);
+        }
+        return parts.join('\n\n');
+      }
+
+      function renderTaskActivityItemHtml(task) {
+        const remaining = Array.isArray(task.remainingSteps)
+          ? task.remainingSteps.map(step => `<li>${escapeHtml(step)}</li>`).join('')
+          : '';
+        const queueNote =
+          task.state === 'run' && task.queuedAfterCount > 0
+            ? `<div class="task-detail">${task.queuedAfterCount} task(s) queued behind this one.</div>`
+            : '';
+        return `
+          <div class="task-item ${escapeHtml(task.state)}">
+            <div class="task-header">
+              <span class="task-title">${escapeHtml(task.taskFolderName)} · ${escapeHtml(task.projectFolder)}</span>
+              <span class="task-badge">${escapeHtml(task.stage)}</span>
+            </div>
+            <div class="task-detail">${escapeHtml(task.currentAction)}</div>
+            ${renderRequestPreviewHtml(task)}
+            ${queueNote}
+            ${
+              remaining
+                ? `<div class="task-remaining">Remaining:<ul>${remaining}</ul></div>`
+                : ''
+            }
+            ${renderQueueItemActions(task)}
+          </div>
+        `;
+      }
+
+      function formatTaskTitle(taskFolderName) {
+        return String(taskFolderName ?? '').replace(/_/g, ' ');
+      }
+
+      function renderRequestPreviewHtml(task, className = 'task-request-preview') {
+        if (!task.requestPreview) {
+          return '';
+        }
+
+        return `<div class="${className}">${escapeHtml(task.requestPreview)}</div>`;
+      }
+
+      function renderAudioWaveIcon() {
+        return '<span class="audio-wave-icon" aria-label="Waiting for audio transcription"><span></span><span></span><span></span></span>';
+      }
+
+      const STARTABLE_QUEUE_STATES = new Set(['run']);
+      const STOPPABLE_QUEUE_STATES = new Set(['run', 'running', 'convert', 'converting']);
+      const REMOVABLE_QUEUE_STATES = new Set(['stopped', 'fail']);
+
+      function isFailedQueueTask(task) {
+        return task.state === 'fail' || (task.state === 'stopped' && Boolean(task.failPreview));
+      }
+
+      function queueItemActions(task) {
+        const actions = [];
+
+        if (STARTABLE_QUEUE_STATES.has(task.state)) {
+          actions.push({ action: 'runTask', label: 'Start', variant: 'primary' });
+        }
+
+        if (STOPPABLE_QUEUE_STATES.has(task.state)) {
+          actions.push({ action: 'stopTask', label: 'Stop', variant: 'secondary' });
+        }
+
+        if (isFailedQueueTask(task)) {
+          actions.push({ action: 'resumeTask', label: 'Resume', variant: 'primary' });
+        }
+
+        if (REMOVABLE_QUEUE_STATES.has(task.state)) {
+          actions.push({ action: 'removeTask', label: 'Remove', variant: 'secondary' });
+        }
+
+        return actions;
+      }
+
+      function renderQueueItemActions(task) {
+        const actions = queueItemActions(task);
+        if (actions.length === 0) {
+          return '';
+        }
+
+        return `
+          <div class="queue-item-actions">
+            ${actions
+              .map(
+                action => `
+                  <button
+                    type="button"
+                    class="queue-item-action ${action.variant}"
+                    data-action="${escapeHtml(action.action)}"
+                    data-project-key="${escapeHtml(task.projectKey ?? '')}"
+                    data-task-folder="${escapeHtml(task.taskFolderName)}">
+                    ${escapeHtml(action.label)}
+                  </button>
+                `,
+              )
+              .join('')}
+          </div>
+        `;
+      }
+
+      function renderQueueItemProgress(conversion) {
+        if (!conversion) {
+          return '';
+        }
+
+        const failed = conversion.phase === 'failed' || Boolean(conversion.error);
+        const percent = Number.isFinite(conversion.percent) ? conversion.percent : 0;
+        const indeterminate = conversion.indeterminate === true && !failed;
+        const width = indeterminate ? 35 : Math.max(4, Math.min(100, percent));
+        const barClass = indeterminate ? 'progress-bar indeterminate' : 'progress-bar';
+
+        return `
+          <div class="queue-item-progress">
+            <div class="progress-track">
+              <div class="${barClass}" style="width: ${width}%"></div>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderQueueItemHtml(task, options = {}) {
+        const {
+          showRank = false,
+          showWave = false,
+          conversion = null,
+          badge = task.stage,
+        } = options;
+        const title = `${escapeHtml(formatTaskTitle(task.taskFolderName))} · ${escapeHtml(task.projectFolder)}`;
+        const summary = escapeHtml(task.currentAction || task.stage || 'Waiting.');
+        const failPreview = task.failPreview
+          ? `<div class="queue-item-fail-preview">${escapeHtml(task.failPreview)}</div>`
+          : '';
+        const rankHtml = showRank
+          ? `<span class="queue-item-rank${task.isNextToRun ? ' next' : ''}">${task.queueRank}</span>`
+          : '';
+        const iconHtml = showWave
+          ? renderAudioWaveIcon()
+          : showRank
+            ? ''
+            : `<span class="queue-item-icon">${task.state === 'running' ? '▶' : task.state === 'stopping' || task.state === 'stop' ? '■' : task.state === 'fail' ? '✕' : '…'}</span>`;
+        const badgeClass = task.isNextToRun ? 'queue-item-badge next' : 'queue-item-badge';
+        const badgeLabel = task.isNextToRun ? 'Next up' : badge;
+        const itemClass = isFailedQueueTask(task) ? `${task.state} failed` : task.state;
+
+        return `
+          <div class="queue-item ${escapeHtml(itemClass)}">
+            ${rankHtml}
+            ${iconHtml}
+            <div class="queue-item-body">
+              <div class="queue-item-title-row">
+                <span class="queue-item-title">${title}</span>
+                <span class="${badgeClass}">${escapeHtml(badgeLabel)}</span>
+              </div>
+              <div class="queue-item-summary">${summary}</div>
+              ${failPreview}
+              ${renderRequestPreviewHtml(task, 'queue-item-request')}
+              ${renderQueueItemProgress(conversion)}
+              ${renderQueueItemActions(task)}
+            </div>
+          </div>
+        `;
+      }
+
+      function renderQueueSection(title, itemsHtml) {
+        if (!itemsHtml) {
+          return '';
+        }
+
+        return `
+          <div class="queue-section">
+            <div class="queue-section-header">${escapeHtml(title)}</div>
+            <div class="queue-section-items">${itemsHtml}</div>
+          </div>
+        `;
+      }
+
+      function sortQueuedTasks(tasks) {
+        return [...tasks].sort((left, right) => {
+          const projectCompare = left.projectFolder.localeCompare(right.projectFolder);
+          if (projectCompare !== 0) {
+            return projectCompare;
+          }
+
+          const leftRank = left.queueRank || 0;
+          const rightRank = right.queueRank || 0;
+          if (leftRank !== rightRank) {
+            return leftRank - rightRank;
+          }
+
+          return left.taskFolderName.localeCompare(right.taskFolderName);
+        });
+      }
+
+      function renderQueueSections(queue) {
+        const tasks = resolveOptimisticItems(queue.tasks ?? [], lastKnownTasks);
+        const conversions = resolveOptimisticItems(queue.conversions ?? [], lastKnownConversions);
+        const conversionsById = new Map(conversions.map(entry => [entry.id, entry]));
+
+        if (tasks.length > 0) {
+          lastKnownTasks = tasks;
+        }
+        if (conversions.length > 0) {
+          lastKnownConversions = conversions;
+        }
+
+        const stoppingTasks = tasks.filter(task => task.state === 'stop' || task.state === 'stopping');
+        const runningTasks = tasks.filter(task => task.state === 'running');
+        const transcribingTasks = tasks.filter(task => task.state === 'convert' || task.state === 'converting');
+        const queuedTasks = sortQueuedTasks(tasks.filter(task => task.state === 'run'));
+        const stoppedTasks = tasks.filter(
+          task => task.state === 'stopped' && !isFailedQueueTask(task),
+        );
+        const failedTasks = tasks.filter(task => isFailedQueueTask(task));
+
+        const sections = [
+          {
+            title: 'Stopping',
+            items: stoppingTasks.map(task => renderQueueItemHtml(task)),
+          },
+          {
+            title: 'Running',
+            items: runningTasks.map(task => renderQueueItemHtml(task)),
+          },
+          {
+            title: 'Transcribing audio',
+            items: transcribingTasks.map(task =>
+              renderQueueItemHtml(task, {
+                showWave: !task.hasRequestText,
+                conversion: task.conversionId
+                  ? conversionsById.get(task.conversionId)
+                  : null,
+                badge: task.stage,
+              }),
+            ),
+          },
+          {
+            title: 'Queued',
+            items: queuedTasks.map(task =>
+              renderQueueItemHtml(task, {
+                showRank: true,
+                badge:
+                  task.queueRank === 1 && !task.isNextToRun
+                    ? 'Waiting for active task'
+                    : task.queuedAfterCount > 0
+                      ? `${task.queuedAfterCount} behind in project`
+                      : 'Queued',
+              }),
+            ),
+          },
+          {
+            title: 'Stopped',
+            items: stoppedTasks.map(task =>
+              renderQueueItemHtml(task, {
+                badge: 'Stopped',
+              }),
+            ),
+          },
+          {
+            title: 'Failed',
+            items: failedTasks.map(task =>
+              renderQueueItemHtml(task, {
+                badge: 'Failed',
+              }),
+            ),
+          },
+        ];
+
+        const snapshot = JSON.stringify({
+          sections,
+          taskWatcherRunning: queue.taskWatcherRunning === true,
+        });
+        if (snapshot === lastQueueSectionsSnapshot) {
+          return;
+        }
+        lastQueueSectionsSnapshot = snapshot;
+
+        const visibleSections = sections
+          .map(section => renderQueueSection(section.title, section.items.join('')))
+          .filter(Boolean)
+          .join('');
+
+        if (!visibleSections) {
+          queueSections.classList.add('hidden');
+          setInnerHTML(queueSections, '');
+          queueIdle.classList.remove('hidden');
+          queueIdle.textContent = queue.taskWatcherRunning
+            ? 'No active tasks. Task monitor is running.'
+            : 'No active tasks. Task monitor is not running.';
+          return;
+        }
+
+        queueIdle.classList.add('hidden');
+        queueIdle.textContent = '';
+        queueSections.classList.remove('hidden');
+        setInnerHTML(queueSections, visibleSections);
+      }
+
+      function renderTaskActivity(tasks) {
+        const items = resolveOptimisticItems(tasks, lastKnownTasks);
+        const snapshot = JSON.stringify(items);
+        if (snapshot === lastTaskActivitySnapshot) {
+          return;
+        }
+        lastTaskActivitySnapshot = snapshot;
+        if (items.length > 0) {
+          lastKnownTasks = items;
+        }
+
+        mergeKeyedPanelItems(taskActivityPanel, items, {
+          itemMap: taskActivityItemElements,
+          getKey: task => `${task.projectFolder}:${task.taskFolderName}`,
+          renderItemHtml: renderTaskActivityItemHtml,
+          sectionLabelHtml: '<div class="section-label">Active tasks</div>',
+        });
+      }
+
+      function renderApiDebug(apiDebugLog) {
+        const entries = resolveOptimisticItems(
+          Array.isArray(apiDebugLog) ? apiDebugLog.slice(0, 6) : [],
+          lastKnownApiDebugLog,
+        );
+        const snapshot = JSON.stringify(entries);
+        if (snapshot === lastApiDebugSnapshot) {
+          return;
+        }
+        lastApiDebugSnapshot = snapshot;
+        if (entries.length > 0) {
+          lastKnownApiDebugLog = entries;
+        }
+
+        if (entries.length === 0) {
+          apiDebugPanel.classList.add('hidden');
+          setInnerHTML(apiDebugPanel, '');
+          return;
+        }
+
+        apiDebugPanel.classList.remove('hidden');
+        setInnerHTML(
+          apiDebugPanel,
+          `
+          <div class="section-label">API debug (last 10 min, ${entries.length} shown)</div>
+          ${entries
+            .map(entry => {
+              const time = entry.timestamp
+                ? new Date(entry.timestamp).toLocaleTimeString()
+                : '';
+              const badge = entry.kind === 'http' ? `${entry.responseStatus ?? '…'}` : 'step';
+              return `
+                <div class="api-item">
+                  <div class="api-header">
+                    <span class="api-title">${escapeHtml(entry.label || 'Debug')}</span>
+                    <span class="api-badge">${escapeHtml(badge)} · ${escapeHtml(time)}</span>
+                  </div>
+                  <pre class="api-body">${escapeHtml(formatApiBody(entry))}</pre>
+                </div>
+              `;
+            })
+            .join('')}
+        `,
+        );
+      }
+
+      function renderState(state) {
+        showError('');
+        setBusy(false);
+
+        preventSleepUpdating = true;
+        preventSleepCheckbox.checked = state.settings?.preventSleep === true;
+        preventSleepUpdating = false;
+
+        if (document.activeElement !== maxParallelInput) {
+          maxParallelUpdating = true;
+          maxParallelInput.value = String(state.settings?.maxParallelTasks ?? 3);
+          maxParallelUpdating = false;
+        }
+
+        contextSettingsUpdating = true;
+        injectActiveContextCheckbox.checked = state.settings?.injectActiveTabContext === true;
+        accumulateHistoryCheckbox.checked = state.settings?.accumulateTaskHistory === true;
+        if (document.activeElement !== contextTokenLimitInput) {
+          contextTokenLimitInput.value = String(state.settings?.contextTokenLimit ?? 6000);
+        }
+        contextSettingsUpdating = false;
+        updateContextTokenHint();
+        updateContextControlsVisibility();
+
+        if (state.platform === 'darwin') {
+          preventSleepCheckbox.disabled = false;
+          preventSleepHint.textContent =
+            'Keeps this Mac awake while Cursor is open and RemoteCode is running.';
+        } else if (state.platform === 'linux') {
+          preventSleepCheckbox.disabled = false;
+          preventSleepHint.textContent =
+            'Uses systemd-inhibit on Linux while Cursor is open and RemoteCode is running.';
+        } else {
+          preventSleepCheckbox.disabled = true;
+          preventSleepHint.textContent =
+            'Sleep prevention is not supported on this platform yet.';
+        }
+
+        if (state.platform !== 'darwin') {
+          icloudCard.classList.add('hidden');
+        } else {
+          icloudCard.classList.remove('hidden');
+          if (!state.icloudAvailable) {
+            icloudConnectBtn.disabled = true;
+            icloudHint.textContent =
+              'iCloud is not signed in on this Mac. Open System Settings → Apple ID → iCloud and enable iCloud Drive.';
+          } else {
+            icloudConnectBtn.disabled = false;
+            icloudHint.textContent =
+              'Sign in to iCloud in System Settings and enable iCloud Drive before connecting.';
+          }
+        }
+
+        if (state.status.connected) {
+          statusPill.textContent = 'Connected';
+          statusPill.className = 'status-pill connected';
+          statusDetail.textContent = `${state.status.providerLabel} · ${state.status.accountEmail}`;
+          connectionActions.classList.remove('hidden');
+          icloudCard.classList.add('hidden');
+          googleCard.classList.add('hidden');
+
+          if (state.folders?.connected) {
+            foldersCard.classList.remove('hidden');
+            foldersCard.querySelector('h2').textContent =
+              state.folders.provider === 'icloud' ? 'iCloud folders' : 'Cloud folders';
+            foldersPath.textContent =
+              state.folders.finderPath || state.folders.workspaceRelativePath;
+
+            if (state.folders.machineExists || state.folders.workspaceExists) {
+              foldersStatus.textContent = `${state.folders.projectFolderCount} project folder(s) provisioned. account.json is refreshed on startup and sync.`;
+              provisionBtn.textContent = 'Sync folders & usage';
+              revealBtn.disabled = false;
+            } else {
+              foldersStatus.textContent =
+                'Machine folder not found yet. Click Sync folders & usage to provision workspace project folders and write account.json.';
+              provisionBtn.textContent = 'Sync folders & usage';
+              revealBtn.disabled = true;
+            }
+
+            const queue = state.queueStats ?? {};
+
+            renderQueueSections(queue);
+            renderApiDebug(queue.apiDebugLog ?? []);
+          } else {
+            foldersCard.classList.add('hidden');
+            hideDynamicQueuePanels();
+          }
+          return;
+        }
+
+        hideAllFolderPanels();
+
+        statusPill.textContent = 'Not connected';
+        statusPill.className = 'status-pill disconnected';
+        statusDetail.textContent =
+          'RemoteCode stays disabled until iCloud or Google Drive is connected.';
+        connectionActions.classList.add('hidden');
+        icloudCard.classList.remove('hidden');
+        googleCard.classList.remove('hidden');
+        if (state.platform !== 'darwin') {
+          icloudCard.classList.add('hidden');
+        }
+      }
+
+      if (!document.documentElement.dataset.remotecodePanelInit) {
+        document.documentElement.dataset.remotecodePanelInit = '1';
+
+        window.addEventListener('message', event => {
+          const message = event.data;
+          if (message.type === 'state') {
+            renderState(message);
+          }
+          if (message.type === 'error') {
+            showError(message.message);
+            setBusy(false);
+          }
+          if (message.type === 'busy') {
+            setBusy(Boolean(message.value));
+          }
+        });
+
+        icloudConnectBtn.addEventListener('click', () => {
+          showError('');
+          setBusy(true);
+          vscode.postMessage({
+            type: 'connectICloud',
+            accountEmail: icloudLabel.value,
+          });
+        });
+
+        googleConnectBtn.addEventListener('click', () => {
+          showError('');
+          setBusy(true);
+          vscode.postMessage({
+            type: 'connectGoogleDrive',
+            accountEmail: googleEmail.value,
+            accessToken: googleToken.value,
+          });
+        });
+
+        logoutBtn.addEventListener('click', () => {
+          showError('');
+          setBusy(true);
+          vscode.postMessage({ type: 'logout' });
+        });
+
+        provisionBtn.addEventListener('click', () => {
+          showError('');
+          setBusy(true);
+          vscode.postMessage({ type: 'provisionWorkspace' });
+        });
+
+        revealBtn.addEventListener('click', () => {
+          showError('');
+          vscode.postMessage({ type: 'revealWorkspaceFolder' });
+        });
+
+        refreshDebugBtn.addEventListener('click', () => {
+          showError('');
+          setBusy(true);
+          vscode.postMessage({ type: 'refreshDebug' });
+        });
+
+        foldersCard.addEventListener('click', remoteCodeQueueAction, true);
+
+        preventSleepCheckbox.addEventListener('change', () => {
+          if (preventSleepUpdating) {
+            return;
+          }
+          vscode.postMessage({
+            type: 'updateSettings',
+            preventSleep: preventSleepCheckbox.checked,
+          });
+        });
+
+        function commitMaxParallel() {
+          if (maxParallelUpdating) {
+            return;
+          }
+          let value = Number.parseInt(maxParallelInput.value, 10);
+          if (!Number.isFinite(value) || value < 1) {
+            value = 1;
+          } else if (value > 20) {
+            value = 20;
+          }
+          maxParallelInput.value = String(value);
+          vscode.postMessage({
+            type: 'updateSettings',
+            maxParallelTasks: value,
+          });
+        }
+
+        maxParallelInput.addEventListener('change', commitMaxParallel);
+        maxParallelInput.addEventListener('blur', commitMaxParallel);
+
+        function updateContextTokenHint() {
+          const value = Number.parseInt(contextTokenLimitInput.value, 10) || 0;
+          contextTokenHint.textContent =
+            value > 0
+              ? `Caps injected prior context to ~${value.toLocaleString()} tokens per task.`
+              : 'Prior-context injection is disabled (0 tokens).';
+        }
+
+        function updateContextControlsVisibility() {
+          const enabled = injectActiveContextCheckbox.checked;
+          accumulateRow.classList.toggle('hidden', !enabled);
+          contextTokenRow.classList.toggle('hidden', !enabled);
+          contextTokenHint.classList.toggle('hidden', !enabled);
+          accumulateHistoryCheckbox.disabled = !enabled;
+          contextTokenLimitInput.disabled = !enabled;
+        }
+
+        injectActiveContextCheckbox.addEventListener('change', () => {
+          updateContextControlsVisibility();
+          if (contextSettingsUpdating) {
+            return;
+          }
+          vscode.postMessage({
+            type: 'updateSettings',
+            injectActiveTabContext: injectActiveContextCheckbox.checked,
+          });
+        });
+
+        accumulateHistoryCheckbox.addEventListener('change', () => {
+          if (contextSettingsUpdating) {
+            return;
+          }
+          vscode.postMessage({
+            type: 'updateSettings',
+            accumulateTaskHistory: accumulateHistoryCheckbox.checked,
+          });
+        });
+
+        contextTokenLimitInput.addEventListener('input', updateContextTokenHint);
+        contextTokenLimitInput.addEventListener('change', () => {
+          if (contextSettingsUpdating) {
+            return;
+          }
+          let value = Number.parseInt(contextTokenLimitInput.value, 10);
+          if (!Number.isFinite(value) || value < 0) {
+            value = 0;
+          }
+          vscode.postMessage({
+            type: 'updateSettings',
+            contextTokenLimit: value,
+          });
+        });
+
+        vscode.postMessage({ type: 'ready' });
+      }
+    </script>
+  </body>
+</html>
