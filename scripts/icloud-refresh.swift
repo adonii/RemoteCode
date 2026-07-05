@@ -2,10 +2,38 @@
 
 import Foundation
 
-private let metadataWaitSeconds: TimeInterval = 1.5
+private let metadataWaitSeconds: TimeInterval = 4
+private let dataVolumePrefix = "/System/Volumes/Data"
 
 private func normalizedDirectoryPrefix(_ path: String) -> String {
   path.hasSuffix("/") ? path : path + "/"
+}
+
+private func metadataPathPrefixes(for expandedPath: String) -> [String] {
+  let userPrefix = normalizedDirectoryPrefix(expandedPath)
+  if expandedPath.hasPrefix(dataVolumePrefix) {
+    return [userPrefix]
+  }
+
+  return [userPrefix, normalizedDirectoryPrefix(dataVolumePrefix + expandedPath)]
+}
+
+private func firstChildName(from metadataPath: String, parentPrefixes: [String]) -> String? {
+  for prefix in parentPrefixes {
+    guard metadataPath.hasPrefix(prefix) else {
+      continue
+    }
+
+    let remainder = String(metadataPath.dropFirst(prefix.count))
+    guard let firstComponent = remainder.split(separator: "/").first.map(String.init),
+          !firstComponent.isEmpty else {
+      continue
+    }
+
+    return firstComponent
+  }
+
+  return nil
 }
 
 private func downloadPaths(_ paths: [String]) {
@@ -71,38 +99,75 @@ private final class MetadataPathCollector {
   }
 }
 
-private func fetchUbiquitousPaths(prefix: String) -> [String] {
+private func fetchUbiquitousPaths(parentPrefixes: [String]) -> [String] {
   let collector = MetadataPathCollector()
   let semaphore = DispatchSemaphore(value: 0)
+  let scopes = [
+    NSMetadataQueryUbiquitousDocumentsScope,
+    NSMetadataQueryUbiquitousDataScope,
+  ]
 
   DispatchQueue.main.async {
     let query = NSMetadataQuery()
-    query.searchScopes = [NSMetadataQueryUbiquitousDocumentsScope]
-    query.predicate = NSPredicate(
-      format: "%K BEGINSWITH[c] %@",
-      NSMetadataItemPathKey,
-      prefix
-    )
+    query.searchScopes = scopes
+    let prefixPredicates = parentPrefixes.map {
+      NSPredicate(
+        format: "%K BEGINSWITH[c] %@",
+        NSMetadataItemPathKey,
+        $0
+      )
+    }
+    query.predicate = NSCompoundPredicate(orPredicateWithSubpredicates: prefixPredicates)
 
-    var observer: NSObjectProtocol?
-    observer = NotificationCenter.default.addObserver(
+    var gatheringObserver: NSObjectProtocol?
+    var updateObserver: NSObjectProtocol?
+    var stopped = false
+
+    func stopQuery() {
+      guard !stopped else {
+        return
+      }
+      stopped = true
+      query.disableUpdates()
+      collector.collect(from: query)
+      query.stop()
+      if let gatheringObserver {
+        NotificationCenter.default.removeObserver(gatheringObserver)
+      }
+      if let updateObserver {
+        NotificationCenter.default.removeObserver(updateObserver)
+      }
+      semaphore.signal()
+    }
+
+    updateObserver = NotificationCenter.default.addObserver(
+      forName: .NSMetadataQueryDidUpdate,
+      object: query,
+      queue: OperationQueue()
+    ) { _ in
+      query.disableUpdates()
+      collector.collect(from: query)
+      query.enableUpdates()
+    }
+
+    gatheringObserver = NotificationCenter.default.addObserver(
       forName: .NSMetadataQueryDidFinishGathering,
       object: query,
       queue: OperationQueue()
     ) { _ in
       query.disableUpdates()
       collector.collect(from: query)
-      query.stop()
-      if let observer {
-        NotificationCenter.default.removeObserver(observer)
-      }
-      semaphore.signal()
+      query.enableUpdates()
     }
 
     query.start()
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + metadataWaitSeconds) {
+      stopQuery()
+    }
   }
 
-  _ = semaphore.wait(timeout: .now() + metadataWaitSeconds)
+  _ = semaphore.wait(timeout: .now() + metadataWaitSeconds + 1)
   return collector.paths
 }
 
@@ -111,24 +176,20 @@ private func listChildren(parentPath: String) -> [String] {
   downloadPaths([expanded])
 
   var results = Set(listViaFileManager(parentPath: expanded))
-  let parentPrefix = normalizedDirectoryPrefix(expanded)
-  let metadataPaths = fetchUbiquitousPaths(prefix: parentPrefix)
+  let parentPrefixes = metadataPathPrefixes(for: expanded)
+  let metadataPaths = fetchUbiquitousPaths(parentPrefixes: parentPrefixes)
+  let userParentPrefix = normalizedDirectoryPrefix(expanded)
 
   for path in metadataPaths {
-    guard path.hasPrefix(parentPrefix) else {
+    guard let firstComponent = firstChildName(from: path, parentPrefixes: parentPrefixes) else {
       continue
     }
 
-    let remainder = String(path.dropFirst(parentPrefix.count))
-    guard let firstComponent = remainder.split(separator: "/").first.map(String.init),
-          !firstComponent.isEmpty else {
-      continue
-    }
-
-    let childPath = parentPrefix + firstComponent
-    if FileManager.default.fileExists(atPath: childPath) {
-      results.insert(firstComponent)
-    }
+    // iCloud items can appear in metadata before the folder exists locally.
+    results.insert(firstComponent)
+    let childPath = userParentPrefix + firstComponent
+    let childUrl = URL(fileURLWithPath: childPath, isDirectory: true)
+    try? FileManager.default.startDownloadingUbiquitousItem(at: childUrl)
   }
 
   return Array(results).sorted()
@@ -146,16 +207,17 @@ private func printJSON<T: Encodable>(_ value: T) {
 
 let args = Array(CommandLine.arguments.dropFirst())
 guard let command = args.first else {
-  fputs("usage: icloud-refresh <refresh|list-children> ...\n", stderr)
+  fputs("usage: icloud-refresh <refresh|download|list-children|read-file|write-file|check-signed-in> ...\n", stderr)
   exit(64)
 }
 
 switch command {
 case "refresh":
-  downloadPaths(Array(args.dropFirst()))
-  if let prefix = args.dropFirst().first {
-    let expanded = (prefix as NSString).expandingTildeInPath
-    _ = fetchUbiquitousPaths(prefix: normalizedDirectoryPrefix(expanded))
+  let paths = Array(args.dropFirst())
+  downloadPaths(paths)
+  for rawPath in paths {
+    let expanded = (rawPath as NSString).expandingTildeInPath
+    _ = fetchUbiquitousPaths(parentPrefixes: metadataPathPrefixes(for: expanded))
   }
   fputs("ok\n", stdout)
 
@@ -165,6 +227,76 @@ case "list-children":
     exit(64)
   }
   printJSON(listChildren(parentPath: parentPath))
+
+case "check-signed-in":
+  let signedIn = FileManager.default.ubiquityIdentityToken != nil
+  fputs(signedIn ? "yes\n" : "no\n", stdout)
+
+case "write-file":
+  guard let filePath = args.dropFirst().first else {
+    fputs("usage: icloud-refresh write-file <path> (content on stdin)\n", stderr)
+    exit(64)
+  }
+  let expandedWritePath = (filePath as NSString).expandingTildeInPath
+  let writeData = FileHandle.standardInput.readDataToEndOfFile()
+  let writeUrl = URL(fileURLWithPath: expandedWritePath)
+  let parentUrl = writeUrl.deletingLastPathComponent()
+  try? FileManager.default.startDownloadingUbiquitousItem(at: parentUrl)
+  try? FileManager.default.createDirectory(at: parentUrl, withIntermediateDirectories: true)
+  try? FileManager.default.startDownloadingUbiquitousItem(at: writeUrl)
+  let writeOk = FileManager.default.createFile(atPath: expandedWritePath, contents: writeData)
+  fputs(writeOk ? "ok\n" : "fail\n", stdout)
+  if !writeOk {
+    exit(1)
+  }
+
+case "read-file":
+  guard let filePath = args.dropFirst().first else {
+    fputs("usage: icloud-refresh read-file <path>\n", stderr)
+    exit(64)
+  }
+  let expandedReadPath = (filePath as NSString).expandingTildeInPath
+  let readUrl = URL(fileURLWithPath: expandedReadPath)
+  let readParentUrl = readUrl.deletingLastPathComponent()
+  try? FileManager.default.startDownloadingUbiquitousItem(at: readParentUrl)
+  try? FileManager.default.startDownloadingUbiquitousItem(at: readUrl)
+  guard FileManager.default.fileExists(atPath: expandedReadPath) else {
+    exit(0)
+  }
+  guard let readData = try? Data(contentsOf: readUrl),
+        let readText = String(data: readData, encoding: .utf8) else {
+    exit(1)
+  }
+  fputs(readText, stdout)
+
+case "download":
+  var downloadPathsList = Array(args.dropFirst())
+  var waitSeconds: TimeInterval = 4
+  if let last = downloadPathsList.last,
+     let parsed = TimeInterval(last),
+     last.allSatisfy({ $0.isNumber || $0 == "." }) {
+    waitSeconds = parsed
+    downloadPathsList.removeLast()
+  }
+  downloadPaths(downloadPathsList)
+  let downloadDeadline = Date().addingTimeInterval(waitSeconds)
+  var pendingPaths = downloadPathsList.map { ($0 as NSString).expandingTildeInPath }
+  while Date() < downloadDeadline && !pendingPaths.isEmpty {
+    pendingPaths = pendingPaths.filter { path in
+      if FileManager.default.fileExists(atPath: path) {
+        return false
+      }
+      let url = URL(fileURLWithPath: path)
+      try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+      try? FileManager.default.startDownloadingUbiquitousItem(at: url.deletingLastPathComponent())
+      return true
+    }
+    if pendingPaths.isEmpty {
+      break
+    }
+    Thread.sleep(forTimeInterval: 0.2)
+  }
+  fputs("ok\n", stdout)
 
 default:
   fputs("unknown command: \(command)\n", stderr)

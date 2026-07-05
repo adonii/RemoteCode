@@ -1,12 +1,12 @@
 {
-  "name": "RemoteCode",
+  "name": "RemotePromptCode",
   "version": "0.4.4",
-  "description": "RemoteCode Cursor server app with iCloud or Google Drive connection",
+  "description": "RemotePromptCode Cursor server app with iCloud or Google Drive connection",
   "author": {
-    "name": "RemoteCode"
+    "name": "RemotePromptCode"
   },
   "license": "MIT",
-  "keywords": ["remotecode", "icloud", "google-drive"],
+  "keywords": ["remotepromptcode", "icloud", "google-drive"],
   "logo": "assets/logo.png",
   "rules": "./rules/",
   "commands": "./commands/",

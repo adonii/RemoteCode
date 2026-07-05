@@ -3,4 +3,3 @@
 .gitignore
 **/*.vsix
 node_modules/@vscode/**
-scripts/sync-shared.mjs

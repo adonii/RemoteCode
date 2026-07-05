@@ -1,0 +1,65 @@
+---
+description: Do not add fallback code paths; fail or return empty instead
+alwaysApply: true
+---
+
+# No fallbacks
+
+RemotePromptCode must not hide missing context, stale state, or alternate data sources behind fallback logic.
+
+## Rules
+
+- Do not fall back to broader scope when narrow scope is unavailable.
+  - Example: a window scoped to one workspace must not scan/list all machine project folders.
+- Do not fall back to alternate identifiers when the primary one is missing.
+  - Example: match projects by stored `workspaceRoot` only; do not guess from basename or `projectKey`.
+- Do not preserve previous UI/stats/cache values when the current read is empty or narrower.
+  - Example: if the scoped task list is empty, show empty — do not reuse `lastKnown*` items.
+- Do not keep legacy global code paths for backward compatibility.
+  - Example: no unscoped watcher PID files or “scan everything” defaults.
+- Do not chain alternate backends for the same operation.
+  - Example: if iCloud listing returns empty, return empty; do not silently retry via filesystem listing.
+
+## When data is missing
+
+- Return an empty result, skip the operation, or surface an explicit error.
+- Require the correct workspace/project context up front instead of inferring later.
+
+## Examples
+
+```javascript
+// ❌ BAD
+try{ 
+  await attemptSubmitTaskMethod1();
+}catch(exc){
+  await trySomethingElse()
+}
+
+// ✅ GOOD
+try{ 
+  await attemptSubmitTask();
+}catch(exc){
+  task.status = 'failed';
+  log_error(exc);
+}
+```
+
+```javascript
+// ❌ BAD
+if (scopedTasks.length === 0) {
+  return previousTasks;
+}
+
+// ✅ GOOD
+return scopedTasks;
+```
+
+```javascript
+// ❌ BAD
+const records = byWorkspaceRoot.length > 0
+  ? byWorkspaceRoot
+  : projectRecords.filter(r => r.projectKey === guessedKey);
+
+// ✅ GOOD
+return byWorkspaceRoot;
+```

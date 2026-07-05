@@ -1,17 +1,17 @@
 ---
-description: Require cloud connection before using RemoteCode plugin features
+description: Require cloud connection before using RemotePromptCode plugin features
 alwaysApply: true
 ---
 
-# RemoteCode cloud connection
+# RemotePromptCode cloud connection
 
-RemoteCode only works when connected to **iCloud** or **Google Drive**.
+RemotePromptCode only works when connected to **iCloud** or **Google Drive**.
 
-- Connect in the **RemoteCode → Cloud Connection** sidebar panel, or Command Palette → **RemoteCode: Open Cloud Settings**
+- Connect in the **RemotePromptCode → Cloud Connection** sidebar panel, or Command Palette → **RemotePromptCode: Open Cloud Settings**
 - Connect with `/connect-cloud` or CLI `node cursor/scripts/cloud-connection.mjs status`
 - Only one provider may be active at a time
 - Log out before switching providers or accounts
-- If not connected, do not perform RemoteCode actions; direct the user to the Cloud Connection panel or `/connect-cloud`
+- If not connected, do not perform RemotePromptCode actions; direct the user to the Cloud Connection panel or `/connect-cloud`
 
 When authenticated, each open workspace project gets a cloud folder:
 

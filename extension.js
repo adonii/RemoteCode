@@ -2,14 +2,27 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vscode = require('vscode');
 
-const VIEW_ID = 'remotecode.cloudConnection';
-const PANEL_REFRESH_MS = 3_000;
-const ICLOUD_BACKGROUND_REFRESH_MS = 2_000;
-const STARTUP_WATCHER_MS = 500;
+const VIEW_ID = 'remotepromptcode.cloudConnection';
+const PANEL_REFRESH_MS = 5_000;
+const BACKGROUND_POLL_MS = 5_000;
 const STARTUP_SYNC_MS = 20_000;
+const BOOTSTRAP_RETRY_MS = 500;
+const BOOTSTRAP_MAX_ATTEMPTS = 120;
 const WORKSPACE_SYNC_DEBOUNCE_MS = 120_000;
 const PUSH_STATE_DEBOUNCE_MS = 500;
-const TASK_CHANGE_DEBOUNCE_MS = 300;
+const TASK_CHANGE_DEBOUNCE_MS = 500;
+
+/**
+ * @param {{ full?: boolean, force?: boolean } | null | undefined} left
+ * @param {{ full?: boolean, force?: boolean }} right
+ * @returns {{ full?: boolean, force?: boolean }}
+ */
+function mergePushStateOptions(left, right) {
+  return {
+    full: left?.full === true || right.full === true,
+    force: left?.force === true || right.force === true,
+  };
+}
 
 /**
  * @param {( ...args: unknown[]) => void} fn
@@ -36,11 +49,29 @@ function getWorkspaceRoots() {
   return vscode.workspace.workspaceFolders?.map(folder => folder.uri.fsPath) ?? [];
 }
 
+async function allKnownWorkspaceRootsAsync() {
+  const { allKnownWorkspaceRoots } = await import('./lib/project-targets.mjs');
+  return allKnownWorkspaceRoots();
+}
+
 /** @type {import('./lib/cloud-connection-service.mjs') | null} */
 let cloudService = null;
 
 /** @type {CloudConnectionViewProvider | null} */
 let viewProvider = null;
+
+/** @type {vscode.StatusBarItem | undefined} */
+let connectionStatusBarItem;
+
+/** Bumped on each extension activation to force one webview HTML reload after reload. */
+let webviewHtmlEpoch = 0;
+
+const EMPTY_QUEUE_STATS = {
+  tasks: [],
+  conversions: [],
+  taskWatcherRunning: false,
+  apiDebugLog: [],
+};
 
 /** @type {{ value: boolean, at: number } | null} */
 let icloudSignedInCache = null;
@@ -100,14 +131,34 @@ async function getCloudService() {
   return cloudService;
 }
 
+/** @returns {Promise<void>} */
+async function updateConnectionStatusBar() {
+  if (!connectionStatusBarItem) {
+    return;
+  }
+
+  const service = await getCloudService();
+  const status = service.getConnectionStatus();
+  if (!status.connected) {
+    connectionStatusBarItem.text = '$(cloud) RemotePromptCode: Not connected';
+    connectionStatusBarItem.tooltip = 'Open Cloud Connection settings to connect iCloud or Google Drive.';
+    connectionStatusBarItem.show();
+    return;
+  }
+
+  connectionStatusBarItem.text = `$(cloud) RemotePromptCode: ${status.accountEmail}`;
+  connectionStatusBarItem.tooltip = `Connected via ${service.providerLabel(status.provider)}`;
+  connectionStatusBarItem.show();
+}
+
 /** @returns {Promise<unknown>} */
-async function runProjectFolderSync() {
+async function runProjectFolderSync(workspaceRoots) {
   const service = await getCloudService();
   if (!service.getConnectionStatus().connected) {
     return null;
   }
 
-  return service.syncProjectCloudFolders(getWorkspaceRoots());
+  return service.syncProjectCloudFolders(workspaceRoots);
 }
 
 /** @returns {Promise<unknown>} */
@@ -123,20 +174,22 @@ async function updateAccountUsageInBackground(viewProvider) {
 }
 
 /** @returns {Promise<unknown>} */
-async function runCloudStartupSync(options = {}) {
+async function runCloudStartupSync(workspaceRoots, options = {}) {
   const service = await getCloudService();
   if (!service.getConnectionStatus().connected) {
     return null;
   }
 
   const { syncCloudOnStartup } = await import('./lib/cloud-startup-sync.mjs');
-  return syncCloudOnStartup(getWorkspaceRoots(), options);
+  return syncCloudOnStartup(workspaceRoots, options);
 }
 
 class CloudConnectionViewProvider {
   /** @param {vscode.ExtensionContext} context */
   constructor(context) {
     this.context = context;
+    /** @type {string[]} */
+    this.workspaceRoots = this.readWorkspaceRoots();
     /** @type {vscode.WebviewView | undefined} */
     this.view = undefined;
     this.viewVisible = false;
@@ -145,7 +198,7 @@ class CloudConnectionViewProvider {
     /** @type {ReturnType<typeof setInterval> | null} */
     this.panelRefreshTimer = null;
     /** @type {ReturnType<typeof setInterval> | null} */
-    this.icloudRefreshTimer = null;
+    this.backgroundPollTimer = null;
     /** @type {import('vscode').Disposable | undefined} */
     this.messageDisposable = undefined;
     /** @type {import('vscode').Disposable | undefined} */
@@ -154,11 +207,15 @@ class CloudConnectionViewProvider {
     this.webviewDisposeDisposable = undefined;
     /** @type {import('vscode').Webview | undefined} */
     this.boundWebview = undefined;
+    /** @type {number | undefined} */
+    this.loadedHtmlEpoch = undefined;
+    /** @type {unknown} */
+    this.lastQueueStatsPayload = null;
     /** @type {Set<string>} */
     this.taskActionInFlight = new Set();
     this.pushStateInFlight = false;
-    this.pendingPushState = false;
-    this.startupComplete = false;
+    /** @type {{ full?: boolean, force?: boolean } | null} */
+    this.pendingPushStateOptions = null;
 
     this.debouncedPushState = createDebounced(() => {
       void this.pushState({ full: false, force: true });
@@ -169,8 +226,50 @@ class CloudConnectionViewProvider {
     }, TASK_CHANGE_DEBOUNCE_MS);
 
     this.debouncedWorkspaceSync = createDebounced(() => {
-      void runCloudStartupSync({ skipAccountUpdate: true });
+      void runCloudStartupSync(this.workspaceRoots, { skipAccountUpdate: true });
     }, WORKSPACE_SYNC_DEBOUNCE_MS);
+
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        void this.handleWorkspaceFoldersChanged();
+      }),
+    );
+  }
+
+  readWorkspaceRoots() {
+    return vscode.workspace.workspaceFolders?.map(folder => folder.uri.fsPath) ?? [];
+  }
+
+  syncWorkspaceRoots() {
+    this.workspaceRoots = this.readWorkspaceRoots();
+  }
+
+  /** Workspace folders for the current window, falling back to saved project records. */
+  async getEffectiveWorkspaceRootsAsync() {
+    this.syncWorkspaceRoots();
+    if (this.workspaceRoots.length > 0) {
+      return this.workspaceRoots;
+    }
+
+    return allKnownWorkspaceRootsAsync();
+  }
+
+  async handleWorkspaceFoldersChanged() {
+    this.syncWorkspaceRoots();
+    this.lastPostedState = null;
+    const { invalidateTaskQueueStatsCache } = await import('./lib/task-stats.mjs');
+    invalidateTaskQueueStatsCache();
+    const { resetTaskTerminalTransitionTracking } = await import(
+      './lib/task-completion-notify.mjs'
+    );
+    const { resetTaskMonitorWatchSnapshot } = await import('./lib/task-monitor.mjs');
+    const { resetTaskWatchSnapshot } = await import('./lib/task-watch-snapshot.mjs');
+    resetTaskTerminalTransitionTracking(this.workspaceRoots);
+    resetTaskWatchSnapshot(this.workspaceRoots);
+    resetTaskMonitorWatchSnapshot(this.workspaceRoots);
+    await this.ensureBackgroundServicesRunning();
+    this.debouncedWorkspaceSync();
+    this.debouncedPushState();
   }
 
   /** @param {vscode.WebviewView} webviewView */
@@ -180,6 +279,10 @@ class CloudConnectionViewProvider {
     this.visibilityDisposable?.dispose();
     this.visibilityDisposable = webviewView.onDidChangeVisibility(visible => {
       this.viewVisible = visible;
+      if (visible) {
+        void this.pushConnectionState({ force: true });
+        void this.pushState({ full: false, force: true });
+      }
     });
     webviewView.webview.options = {
       enableScripts: true,
@@ -191,15 +294,17 @@ class CloudConnectionViewProvider {
     const isNewWebview = this.boundWebview !== webview;
     this.boundWebview = webview;
 
-    if (!webviewMessageBindings.has(webview)) {
-      this.messageDisposable = bindWebviewMessageHandler(webview, message => {
-        return this.handleWebviewMessage(message);
-      });
-    }
+    this.messageDisposable = bindWebviewMessageHandler(webview, message => {
+      return this.handleWebviewMessage(message);
+    });
 
-    // Always load HTML when the webview instance changes (e.g. after extension reload).
-    // Skipping reload leaves a stale service worker ID and breaks the panel.
-    if (isNewWebview) {
+    // Reload when the webview instance changes or after extension activation.
+    // Avoid reloading on every resolve — that resets the panel to "Not connected"
+    // until a slow iCloud queue scan finishes.
+    const needsHtmlReload = isNewWebview || this.loadedHtmlEpoch !== webviewHtmlEpoch;
+    if (needsHtmlReload) {
+      this.loadedHtmlEpoch = webviewHtmlEpoch;
+      this.lastPostedState = null;
       webview.html = fs.readFileSync(htmlPath, 'utf8');
     }
 
@@ -209,6 +314,10 @@ class CloudConnectionViewProvider {
       this.view = undefined;
       this.stopPanelRefresh();
     });
+
+    if (this.viewVisible) {
+      void this.pushConnectionState({ force: true });
+    }
   }
 
   disposeWebviewBindings() {
@@ -270,7 +379,8 @@ class CloudConnectionViewProvider {
 
       if (payload.type === 'ready') {
         this.startPanelRefresh();
-        await this.pushState({ full: false, force: true });
+        await this.pushConnectionState({ force: true });
+        void this.pushState({ full: false, force: true });
         return;
       }
 
@@ -382,31 +492,54 @@ class CloudConnectionViewProvider {
       const service = await getCloudService();
 
       if (payload.type === 'connectICloud') {
-        await service.connectICloud(payload.accountEmail ?? '');
-        const sync = await runCloudStartupSync();
-        vscode.window.showInformationMessage(
-          `RemoteCode connected to iCloud. Synced ${sync?.provisionedProjects ?? 0} project folder(s).`,
-        );
-        await this.pushState({ full: false, force: true });
+        const { debugLog } = await import('./lib/debug-log.mjs');
+        debugLog('extension', `connectICloud requested (label=${payload.accountEmail ?? ''}).`);
+        try {
+          await service.connectICloud(payload.accountEmail ?? '');
+          this.lastPostedState = null;
+          await this.pushConnectionState({ force: true });
+          await this.ensureBackgroundServicesRunning();
+          const sync = await runCloudStartupSync(this.workspaceRoots, {
+            skipAccountUpdate: true,
+          });
+          void updateAccountUsageInBackground(this);
+          const status = service.getConnectionStatus();
+          if (status.connected) {
+            vscode.window.showInformationMessage(
+              `RemotePromptCode connected to iCloud. Synced ${sync?.provisionedProjects ?? 0} project folder(s).`,
+            );
+          }
+          void updateConnectionStatusBar();
+          await this.pushState({ full: false, force: true });
+        } finally {
+          this.postMessage({ type: 'busy', value: false });
+        }
         return;
       }
 
       if (payload.type === 'connectGoogleDrive') {
-        await service.connectGoogleDrive(payload.accountEmail ?? '', payload.accessToken ?? '');
-        const sync = await runCloudStartupSync();
-        vscode.window.showInformationMessage(
-          `RemoteCode connected to Google Drive. Synced ${sync?.provisionedProjects ?? 0} project folder(s).`,
-        );
-        await this.pushState({ full: false, force: true });
+        try {
+          await service.connectGoogleDrive(payload.accountEmail ?? '', payload.accessToken ?? '');
+          this.lastPostedState = null;
+          await this.pushConnectionState({ force: true });
+          await this.ensureBackgroundServicesRunning();
+          const sync = await runCloudStartupSync(this.workspaceRoots);
+          vscode.window.showInformationMessage(
+            `RemotePromptCode connected to Google Drive. Synced ${sync?.provisionedProjects ?? 0} project folder(s).`,
+          );
+          await this.pushState({ full: false, force: true });
+        } finally {
+          this.postMessage({ type: 'busy', value: false });
+        }
         return;
       }
 
       if (payload.type === 'provisionWorkspace') {
-        const sync = await runProjectFolderSync();
+        const sync = await runProjectFolderSync(this.workspaceRoots);
         const { invalidateCloudFolderStatusCache } = await import('./lib/cloud-folder-status.mjs');
         invalidateCloudFolderStatusCache();
         vscode.window.showInformationMessage(
-          `RemoteCode synced ${sync?.provisionedProjects ?? 0} project folder(s). Updating account.json in the background.`,
+          `RemotePromptCode synced ${sync?.provisionedProjects ?? 0} project folder(s). Updating account.json in the background.`,
         );
         await this.pushState({ full: false, force: true });
         this.postMessage({ type: 'busy', value: false });
@@ -415,18 +548,15 @@ class CloudConnectionViewProvider {
       }
 
       if (payload.type === 'revealWorkspaceFolder') {
-        const folders = await service.getCloudFolderStatus(getWorkspaceRoots());
-        const revealPath =
-          folders.machineAbsolutePath && fs.existsSync(folders.machineAbsolutePath)
-            ? folders.machineAbsolutePath
-            : folders.workspaceAbsolutePath;
+        const folders = await service.getCloudFolderStatus(this.workspaceRoots);
+        const revealPath = folders.workspaceAbsolutePath;
         if (revealPath && fs.existsSync(revealPath)) {
           await vscode.commands.executeCommand(
             'revealFileInOS',
             vscode.Uri.file(revealPath),
           );
         } else {
-          throw new Error('Machine folder does not exist yet. Sync folders first.');
+          throw new Error('Project cloud folder does not exist yet. Sync folders first.');
         }
         return;
       }
@@ -435,10 +565,14 @@ class CloudConnectionViewProvider {
         service.logout();
         const { invalidateCloudFolderStatusCache } = await import('./lib/cloud-folder-status.mjs');
         const { invalidateTaskQueueStatsCache } = await import('./lib/task-stats.mjs');
+        const { resetTaskTerminalTransitionTracking } = await import(
+          './lib/task-completion-notify.mjs'
+        );
         invalidateCloudFolderStatusCache();
         invalidateTaskQueueStatsCache();
+        resetTaskTerminalTransitionTracking();
         this.lastPostedState = null;
-        vscode.window.showInformationMessage('RemoteCode cloud connection removed.');
+        vscode.window.showInformationMessage('RemotePromptCode cloud connection removed.');
         await this.pushState();
       }
     } catch (error) {
@@ -456,9 +590,6 @@ class CloudConnectionViewProvider {
       if (!this.viewVisible) {
         return;
       }
-      // Force a fresh read each cycle: task state is changed on disk by the
-      // watcher subprocess and the orchestrator, so the in-memory stats cache
-      // would otherwise mask completed/new tasks until a manual Sync.
       void this.pushState({ full: false, force: true });
     }, PANEL_REFRESH_MS);
   }
@@ -470,6 +601,104 @@ class CloudConnectionViewProvider {
     }
   }
 
+  startBackgroundPolling() {
+    if (this.backgroundPollTimer) {
+      return;
+    }
+
+    this.backgroundPollTimer = setInterval(() => {
+      void this.backgroundPollTick();
+    }, BACKGROUND_POLL_MS);
+  }
+
+  stopBackgroundPolling() {
+    if (this.backgroundPollTimer) {
+      clearInterval(this.backgroundPollTimer);
+      this.backgroundPollTimer = null;
+    }
+  }
+
+  /** @returns {Promise<boolean>} */
+  async ensureBackgroundServicesRunning() {
+    this.syncWorkspaceRoots();
+
+    const service = await getCloudService();
+    if (!service.getConnectionStatus().connected) {
+      return false;
+    }
+
+    const { loadProjectRecords } = await import('./lib/cloud-connection-store.mjs');
+    const effectiveRoots = await this.getEffectiveWorkspaceRootsAsync();
+    if (effectiveRoots.length === 0 && loadProjectRecords().length === 0) {
+      return false;
+    }
+
+    const { ensureTaskWatcherRunning, isTaskWatcherRunning, purgeNonCanonicalWatcherProcesses } = await import('./lib/task-monitor.mjs');
+    purgeNonCanonicalWatcherProcesses();
+    if (!isTaskWatcherRunning()) {
+      ensureTaskWatcherRunning();
+    }
+
+    const { startTaskOrchestrator } = await import('./lib/task-orchestrator.mjs');
+    startTaskOrchestrator(vscode);
+    const { startTaskChangeWatcher } = await import('./lib/task-change-watch.mjs');
+    startTaskChangeWatcher(() => {
+      this.debouncedTaskChangeRefresh();
+    }, effectiveRoots.length > 0 ? effectiveRoots : null);
+    void updateConnectionStatusBar();
+    return true;
+  }
+
+  async backgroundPollTick() {
+    if (!(await this.ensureBackgroundServicesRunning())) {
+      return;
+    }
+
+    const service = await getCloudService();
+    if (service.getConnectionStatus().connected) {
+      const { isICloudFilesystemConnection, scheduleICloudStorageRefresh } = await import(
+        './lib/icloud-storage.mjs'
+      );
+      if (isICloudFilesystemConnection()) {
+        const { loadProjectRecords } = await import('./lib/cloud-connection-store.mjs');
+        const { uniqueProjectTargets } = await import('./lib/project-targets.mjs');
+        const targets = uniqueProjectTargets(loadProjectRecords());
+        if (targets.length > 0) {
+          scheduleICloudStorageRefresh(targets);
+        }
+      }
+    }
+
+    const effectiveRoots = await this.getEffectiveWorkspaceRootsAsync();
+    const { requestBackgroundScan } = await import('./lib/task-monitor.mjs');
+    requestBackgroundScan(effectiveRoots, { forceICloudRefresh: true });
+
+    await this.notifyTaskTerminalTransitions();
+
+    if (this.view) {
+      void this.pushState({ full: false, force: true });
+    }
+  }
+
+  async notifyTaskTerminalTransitions() {
+    const service = await getCloudService();
+    if (!service.getConnectionStatus().connected) {
+      return;
+    }
+
+    const { detectTaskTerminalTransitions } = await import('./lib/task-completion-notify.mjs');
+    const transitions = await detectTaskTerminalTransitions(this.workspaceRoots);
+    for (const transition of transitions) {
+      const label = `${transition.taskFolderName} (${transition.projectFolder})`;
+      if (transition.state === 'done') {
+        vscode.window.showInformationMessage(`RemotePromptCode task completed: ${label}.`);
+      } else {
+        const detail = transition.failPreview ? ` ${transition.failPreview}` : '';
+        vscode.window.showWarningMessage(`RemotePromptCode task failed: ${label}.${detail}`);
+      }
+    }
+  }
+
   async refreshAfterTaskFolderChange() {
     try {
       const service = await getCloudService();
@@ -477,97 +706,110 @@ class CloudConnectionViewProvider {
         return;
       }
 
+      const { requestBackgroundScan } = await import('./lib/task-monitor.mjs');
+      requestBackgroundScan(this.workspaceRoots, { force: true, forceICloudRefresh: true });
+
+      const { scheduleICloudStorageRefresh } = await import('./lib/icloud-storage.mjs');
+      const { loadProjectRecords } = await import('./lib/cloud-connection-store.mjs');
+      const { resolveProjectTargets } = await import('./lib/project-targets.mjs');
+      const targets = resolveProjectTargets(loadProjectRecords(), this.workspaceRoots);
+      if (targets.length > 0) {
+        scheduleICloudStorageRefresh(targets);
+      }
+
       const { invalidateTaskQueueStatsCache } = await import('./lib/task-stats.mjs');
       invalidateTaskQueueStatsCache();
-      const { invalidateICloudListCache, refreshICloudStorageForScan } = await import(
-        './lib/icloud-storage.mjs'
-      );
-      const { uniqueProjectTargets } = await import('./lib/project-targets.mjs');
-      const { loadProjectRecords } = await import('./lib/cloud-connection-store.mjs');
-      await refreshICloudStorageForScan(uniqueProjectTargets(loadProjectRecords()));
-      invalidateICloudListCache();
-      const { requestBackgroundScan } = await import('./lib/task-monitor.mjs');
-      requestBackgroundScan();
       await this.pushState({ full: false, force: true });
     } catch {
-      // Best effort; polling still covers missed events.
+      // Best effort; the task watcher subprocess still scans on its interval.
     }
   }
 
   startBackgroundServices() {
-    if (this.startupComplete) {
-      return;
+    this.startBackgroundPolling();
+    void this.bootstrapConnectedExtensionWithRetry();
+  }
+
+  /** @returns {Promise<boolean>} */
+  async bootstrapConnectedExtension() {
+    const effectiveRoots = await this.getEffectiveWorkspaceRootsAsync();
+    if (effectiveRoots.length === 0) {
+      const { loadProjectRecords } = await import('./lib/cloud-connection-store.mjs');
+      if (loadProjectRecords().length === 0) {
+        return false;
+      }
     }
 
-    this.startupComplete = true;
+    const service = await getCloudService();
+    if (!service.getConnectionStatus().connected) {
+      return false;
+    }
 
-    setTimeout(async () => {
-      try {
-        const service = await getCloudService();
-        if (!service.getConnectionStatus().connected) {
-          return;
+    const { loadProjectRecords } = await import('./lib/cloud-connection-store.mjs');
+    const { debugLog } = await import('./lib/debug-log.mjs');
+    debugLog(
+      'extension',
+      `Restoring saved ${service.getConnectionStatus().provider} connection ` +
+        `for ${effectiveRoots.length || loadProjectRecords().length} known project(s).`,
+    );
+
+    await this.ensureBackgroundServicesRunning();
+
+    const { ensureTaskWatcherCurrent } = await import('./lib/task-monitor.mjs');
+    ensureTaskWatcherCurrent(effectiveRoots);
+
+    const { uniqueProjectTargets } = await import('./lib/project-targets.mjs');
+    const { isICloudFilesystemConnection, refreshICloudStorageForScan } = await import(
+      './lib/icloud-storage.mjs'
+    );
+    const targets = uniqueProjectTargets(loadProjectRecords());
+    if (isICloudFilesystemConnection() && targets.length > 0) {
+      await refreshICloudStorageForScan(targets, { force: true });
+    }
+
+    const { requestBackgroundScan } = await import('./lib/task-monitor.mjs');
+    requestBackgroundScan(effectiveRoots, { force: true, forceICloudRefresh: true });
+
+    try {
+      await runCloudStartupSync(effectiveRoots, { skipAccountUpdate: true });
+    } catch {
+      // iCloud paths can fail intermittently during startup.
+    }
+
+    debugLog('extension', 'Saved cloud connection bootstrap complete.');
+    void updateConnectionStatusBar();
+    return true;
+  }
+
+  async bootstrapConnectedExtensionWithRetry() {
+    for (let attempt = 0; attempt < BOOTSTRAP_MAX_ATTEMPTS; attempt += 1) {
+      if (await this.bootstrapConnectedExtension()) {
+        if (this.view) {
+          await this.pushConnectionState({ force: true });
         }
-        const { ensureTaskWatcherRunning } = await import('./lib/task-monitor.mjs');
-        ensureTaskWatcherRunning();
-        const { startTaskOrchestrator } = await import('./lib/task-orchestrator.mjs');
-        startTaskOrchestrator(vscode);
-        const { startTaskChangeWatcher } = await import('./lib/task-change-watch.mjs');
-        startTaskChangeWatcher(() => {
-          this.debouncedTaskChangeRefresh();
-        });
-        this.startICloudBackgroundRefresh();
-      } catch {
-        // Task watcher handles conversion in a subprocess.
+        void updateConnectionStatusBar();
+        return;
       }
-    }, STARTUP_WATCHER_MS);
 
+      await new Promise(resolve => {
+        setTimeout(resolve, BOOTSTRAP_RETRY_MS);
+      });
+    }
+  }
+
+  scheduleDeferredAccountUpdate() {
     setTimeout(async () => {
       try {
         const service = await getCloudService();
         if (!service.getConnectionStatus().connected) {
           return;
         }
-        await runCloudStartupSync({ skipAccountUpdate: true });
+        const { updateMachineAccountFile } = await import('./lib/machine-account.mjs');
+        await updateMachineAccountFile();
       } catch {
-        // iCloud paths can fail intermittently.
+        // Usage stats are optional.
       }
     }, STARTUP_SYNC_MS);
-  }
-
-  startICloudBackgroundRefresh() {
-    if (this.icloudRefreshTimer) {
-      return;
-    }
-
-    this.icloudRefreshTimer = setInterval(() => {
-      void (async () => {
-        try {
-          const service = await getCloudService();
-          if (!service.getConnectionStatus().connected) {
-            return;
-          }
-
-          const { isICloudFilesystemConnection, scheduleICloudStorageRefresh } = await import(
-            './lib/icloud-storage.mjs'
-          );
-          if (!isICloudFilesystemConnection()) {
-            return;
-          }
-
-          scheduleICloudStorageRefresh();
-          this.debouncedTaskChangeRefresh();
-        } catch {
-          // Best effort; task watcher polling still covers missed refreshes.
-        }
-      })();
-    }, ICLOUD_BACKGROUND_REFRESH_MS);
-  }
-
-  stopICloudBackgroundRefresh() {
-    if (this.icloudRefreshTimer) {
-      clearInterval(this.icloudRefreshTimer);
-      this.icloudRefreshTimer = null;
-    }
   }
 
   dispose() {
@@ -585,13 +827,62 @@ class CloudConnectionViewProvider {
 
     this.disposeWebviewBindings();
 
-    if (this.panelRefreshTimer) {
-      clearInterval(this.panelRefreshTimer);
-      this.panelRefreshTimer = null;
+    this.stopPanelRefresh();
+    this.stopBackgroundPolling();
+  }
+
+  /** @param {{ force?: boolean }} [options] */
+  async pushConnectionState(options = {}) {
+    if (!this.view) {
+      return;
     }
 
-    this.stopPanelRefresh();
-    this.stopICloudBackgroundRefresh();
+    this.syncWorkspaceRoots();
+    const workspaceRoots = this.workspaceRoots;
+    const service = await getCloudService();
+    const status = service.getConnectionStatus();
+
+    let icloudAvailable = false;
+    if (icloudSignedInCache && Date.now() - icloudSignedInCache.at < ICLOUD_CHECK_CACHE_MS) {
+      icloudAvailable = icloudSignedInCache.value;
+    } else {
+      icloudAvailable = await service.checkMacICloudSignedIn();
+      icloudSignedInCache = { value: icloudAvailable, at: Date.now() };
+    }
+
+    const { loadSettings } = await import('./lib/settings-store.mjs');
+    const settings = loadSettings();
+
+    /** @type {{ connected: true, provider: string, accountEmail: string, connectedAt: string, hasAccessToken: boolean, providerLabel: string } | { connected: false }} */
+    let panelStatus = { connected: false };
+    if (status.connected) {
+      panelStatus = {
+        ...status,
+        providerLabel: service.providerLabel(status.provider),
+      };
+    }
+
+    const folders = service.getCloudFolderStatus(workspaceRoots, {
+      force: options.force === true,
+    });
+
+    const payload = {
+      type: 'state',
+      platform: process.platform,
+      icloudAvailable,
+      status: panelStatus,
+      folders,
+      queueStats: this.lastQueueStatsPayload ?? EMPTY_QUEUE_STATS,
+      settings,
+    };
+
+    const serialized = JSON.stringify(payload);
+    if (options.force !== true && serialized === this.lastPostedState) {
+      return;
+    }
+
+    this.lastPostedState = serialized;
+    this.postMessage(payload);
   }
 
   /** @param {{ full?: boolean, force?: boolean }} [options] */
@@ -602,18 +893,24 @@ class CloudConnectionViewProvider {
     }
 
     if (this.pushStateInFlight) {
-      this.pendingPushState = true;
+      this.pendingPushStateOptions = mergePushStateOptions(
+        this.pendingPushStateOptions,
+        options,
+      );
       return;
     }
 
     this.pushStateInFlight = true;
     try {
+      this.syncWorkspaceRoots();
+      const workspaceRoots = this.workspaceRoots;
+
       const service = await getCloudService();
-      const status = service.getConnectionStatus();
+      const initialStatus = service.getConnectionStatus();
       let icloudAvailable = false;
       if (icloudSignedInCache && Date.now() - icloudSignedInCache.at < ICLOUD_CHECK_CACHE_MS) {
         icloudAvailable = icloudSignedInCache.value;
-      } else if (full || !status.connected) {
+      } else if (full || !initialStatus.connected) {
         icloudAvailable = await service.checkMacICloudSignedIn();
         icloudSignedInCache = { value: icloudAvailable, at: Date.now() };
       }
@@ -623,12 +920,16 @@ class CloudConnectionViewProvider {
       const queueStats = await getTaskQueueStats({
         lite: !full,
         force: options.force === true,
+        workspaceRoots,
       });
       const settings = loadSettings();
 
       if (!this.view) {
         return;
       }
+
+      // Re-read connection after slow queue scan — connect/disconnect may have changed mid-flight.
+      const status = service.getConnectionStatus();
 
       /** @type {{ connected: true, provider: string, accountEmail: string, connectedAt: string, hasAccessToken: boolean, providerLabel: string } | { connected: false }} */
       let panelStatus = { connected: false };
@@ -640,7 +941,7 @@ class CloudConnectionViewProvider {
         };
       }
 
-      const folders = service.getCloudFolderStatus(getWorkspaceRoots(), {
+      const folders = service.getCloudFolderStatus(workspaceRoots, {
         force: full || options.force === true,
       });
 
@@ -660,12 +961,22 @@ class CloudConnectionViewProvider {
       }
 
       this.lastPostedState = serialized;
+      this.lastQueueStatsPayload = queueStats;
       this.postMessage(payload);
+
+      if (options.force === true && status.connected) {
+        try {
+          await this.notifyTaskTerminalTransitions();
+        } catch {
+          // UI already updated; notifications are best-effort.
+        }
+      }
     } finally {
       this.pushStateInFlight = false;
-      if (this.pendingPushState) {
-        this.pendingPushState = false;
-        this.debouncedPushState();
+      const pending = this.pendingPushStateOptions;
+      this.pendingPushStateOptions = null;
+      if (pending) {
+        void this.pushState(pending);
       }
     }
   }
@@ -687,7 +998,7 @@ async function promptConnectFlow() {
   if (service.getConnectionStatus().connected) {
     const status = service.getConnectionStatus();
     const choice = await vscode.window.showInformationMessage(
-      `RemoteCode is connected to ${service.providerLabel(status.provider)} (${status.accountEmail}).`,
+      `RemotePromptCode is connected to ${service.providerLabel(status.provider)} (${status.accountEmail}).`,
       'Open Cloud Settings',
       'Log out',
     );
@@ -695,7 +1006,7 @@ async function promptConnectFlow() {
       viewProvider?.reveal();
     } else if (choice === 'Log out') {
       service.logout();
-      vscode.window.showInformationMessage('RemoteCode cloud connection removed.');
+      vscode.window.showInformationMessage('RemotePromptCode cloud connection removed.');
       await viewProvider?.pushState();
     }
     return;
@@ -714,7 +1025,7 @@ async function promptConnectFlow() {
         pick: 'google_drive',
       },
     ],
-    { placeHolder: 'Choose a cloud provider for RemoteCode' },
+    { placeHolder: 'Choose a cloud provider for RemotePromptCode' },
   );
 
   if (!provider) {
@@ -732,9 +1043,11 @@ async function promptConnectFlow() {
         return;
       }
       await service.connectICloud(accountEmail);
-      const sync = await runCloudStartupSync();
+      await viewProvider?.pushConnectionState({ force: true });
+      await viewProvider?.ensureBackgroundServicesRunning();
+      const sync = await runCloudStartupSync(viewProvider?.workspaceRoots ?? getWorkspaceRoots());
       vscode.window.showInformationMessage(
-        `RemoteCode connected to iCloud. Synced ${sync?.provisionedProjects ?? 0} project folder(s).`,
+        `RemotePromptCode connected to iCloud. Synced ${sync?.provisionedProjects ?? 0} project folder(s).`,
       );
     } else {
       const accountEmail = await vscode.window.showInputBox({
@@ -752,9 +1065,11 @@ async function promptConnectFlow() {
         ignoreFocusOut: true,
       });
       await service.connectGoogleDrive(accountEmail, accessToken ?? '');
-      const sync = await runCloudStartupSync();
+      await viewProvider?.pushConnectionState({ force: true });
+      await viewProvider?.ensureBackgroundServicesRunning();
+      const sync = await runCloudStartupSync(viewProvider?.workspaceRoots ?? getWorkspaceRoots());
       vscode.window.showInformationMessage(
-        `RemoteCode connected to Google Drive. Synced ${sync?.provisionedProjects ?? 0} project folder(s).`,
+        `RemotePromptCode connected to Google Drive. Synced ${sync?.provisionedProjects ?? 0} project folder(s).`,
       );
     }
 
@@ -770,8 +1085,8 @@ function registerCursorPlugin(context) {
   const cursorApi = vscode.cursor;
   if (!cursorApi?.plugins?.registerPath) {
     console.warn(
-      '[RemoteCode] vscode.cursor.plugins.registerPath unavailable; hooks will not auto-register. ' +
-        'Symlink this extension to ~/.cursor/plugins/local/RemoteCode to enable hooks, or run in extension development mode.',
+      '[RemotePromptCode] vscode.cursor.plugins.registerPath unavailable; hooks will not auto-register. ' +
+        'Symlink this extension to ~/.cursor/plugins/local/RemotePromptCode to enable hooks, or run in extension development mode.',
     );
     return false;
   }
@@ -781,16 +1096,50 @@ function registerCursorPlugin(context) {
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[RemoteCode] Failed to register plugin hooks: ${message}`);
+    console.warn(`[RemotePromptCode] Failed to register plugin hooks: ${message}`);
     return false;
   }
 }
 
 /** @param {vscode.ExtensionContext} context */
 function activate(context) {
+  webviewHtmlEpoch += 1;
   registerCursorPlugin(context);
+
+  connectionStatusBarItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Left,
+    100,
+  );
+  connectionStatusBarItem.command = 'remotepromptcode.openCloudSettings';
+  context.subscriptions.push(connectionStatusBarItem);
+  void updateConnectionStatusBar();
+
+  void import('./lib/task-monitor.mjs').then(({ ensureTaskWatcherCurrent, listInstalledExtensionVersions }) => {
+    ensureTaskWatcherCurrent();
+    const versions = listInstalledExtensionVersions();
+    if (versions.length > 1) {
+      void vscode.window.showWarningMessage(
+        `RemotePromptCode has ${versions.length} versions installed (${versions.join(', ')}). ` +
+          'Uninstall all except the newest or task pickup will be unreliable.',
+        'Open Extensions',
+      ).then(choice => {
+        if (choice === 'Open Extensions') {
+          void vscode.commands.executeCommand('workbench.view.extensions', 'andreidonii.remotepromptcode');
+        }
+      });
+    }
+  });
   viewProvider = new CloudConnectionViewProvider(context);
   viewProvider.startBackgroundServices();
+  viewProvider.scheduleDeferredAccountUpdate();
+
+  void getCloudService().then(async service => {
+    if (!service.getConnectionStatus().connected) {
+      return;
+    }
+    viewProvider?.syncWorkspaceRoots();
+    await viewProvider?.ensureBackgroundServicesRunning();
+  });
 
   void import('./lib/cursor-auth.mjs').then(({ refreshCursorAuthCacheSync }) => {
     refreshCursorAuthCacheSync();
@@ -804,54 +1153,55 @@ function activate(context) {
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(VIEW_ID, viewProvider, {
-      webviewOptions: { retainContextWhenHidden: true },
+      webviewOptions: { retainContextWhenHidden: false },
     }),
-    vscode.commands.registerCommand('remotecode.openCloudSettings', () => {
+    vscode.commands.registerCommand('remotepromptcode.openCloudSettings', () => {
       viewProvider?.reveal();
     }),
-    vscode.commands.registerCommand('remotecode.connectCloud', () => {
+    vscode.commands.registerCommand('remotepromptcode.connectCloud', () => {
       void promptConnectFlow();
     }),
-    vscode.commands.registerCommand('remotecode.logoutCloud', async () => {
+    vscode.commands.registerCommand('remotepromptcode.logoutCloud', async () => {
       const service = await getCloudService();
       if (!service.getConnectionStatus().connected) {
-        vscode.window.showInformationMessage('RemoteCode is not connected to a cloud provider.');
+        vscode.window.showInformationMessage('RemotePromptCode is not connected to a cloud provider.');
         return;
       }
       service.logout();
-      vscode.window.showInformationMessage('RemoteCode cloud connection removed.');
+      const { resetTaskTerminalTransitionTracking } = await import(
+        './lib/task-completion-notify.mjs'
+      );
+      resetTaskTerminalTransitionTracking();
+      vscode.window.showInformationMessage('RemotePromptCode cloud connection removed.');
       await viewProvider?.pushState();
     }),
     { dispose: () => viewProvider?.dispose() },
   );
 
   void getCloudService().then(service => {
-    if (!service.getConnectionStatus().connected) {
-      void vscode.window
-        .showInformationMessage(
-          'RemoteCode needs iCloud or Google Drive before project folders can sync.',
-          'Open Cloud Settings',
-        )
-        .then(choice => {
-          if (choice === 'Open Cloud Settings') {
-            viewProvider?.reveal();
-          }
-        });
+    if (service.getConnectionStatus().connected) {
+      return;
     }
-  });
 
-  context.subscriptions.push(
-    vscode.workspace.onDidChangeWorkspaceFolders(() => {
-      viewProvider?.debouncedWorkspaceSync();
-      viewProvider?.debouncedPushState();
-    }),
-  );
+    void vscode.window
+      .showInformationMessage(
+        'RemotePromptCode needs iCloud or Google Drive before project folders can sync.',
+        'Open Cloud Settings',
+      )
+      .then(choice => {
+        if (choice === 'Open Cloud Settings') {
+          viewProvider?.reveal();
+        }
+      });
+  });
 }
 
 function deactivate() {
   viewProvider?.dispose();
   viewProvider = null;
   cloudService = null;
+  connectionStatusBarItem?.dispose();
+  connectionStatusBarItem = undefined;
 }
 
 module.exports = { activate, deactivate };

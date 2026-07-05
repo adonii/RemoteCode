@@ -1,11 +1,11 @@
 ---
-description: RemoteCode project conventions
+description: RemotePromptCode project conventions
 alwaysApply: true
 ---
 
-# RemoteCode
+# RemotePromptCode
 
-RemoteCode is split into **server apps** and **client apps**.
+RemotePromptCode is split into **server apps** and **client apps**.
 
 ## Server apps
 

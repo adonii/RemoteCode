@@ -1,35 +1,36 @@
-# RemoteCode Cursor Plugin
+New way of coding - doing it remoteley !
+Secure remote coding over your own cloud storage.
+No 3rd party servers to track your tasks and steal ideas - you own everything.
+Voice or text prompts on your phone gets executed on your laptop. Easy coding with no extra luggage.
+No extra cost ! Only one-time purchase of iOS app - to cover development costs. Android (comming up next) version is free.
+# RemotePromptCode Cursor Plugin
 
-Cursor **server app** for [RemoteCode](https://github.com/adonii/RemoteCode).
+Walking out your dog? No problem. You still can code.
 
-Client apps (mobile, watch, etc.) live in the [RemoteCode monorepo](https://github.com/remotecode/RemoteCode).
+Stuck in the bathroom with a great idea? Don't just save it to your phone notes — send it to your IDE for implementation.
+
+Can't sleep? Then keep on coding! Your AI subscription will not pay for itself.
+
+On a vacation half a globa away from your workstation ? You still can fix the prod issue.
+
+All communication between your phone and your IDE runs through a secure connection and stays in your own cloud storage — iCloud or Google Drive. No third-party servers, no middlemen. Your data stays within your reach.
+
+Cursor server app that connects to iCloud or Google Drive and orchestrates remote coding tasks from your phone or another device while you're away from your desk.
 
 ## Cloud connection (required)
 
-RemoteCode stays disabled until you connect **iCloud** or **Google Drive**.
+RemotePromptCode stays disabled until you connect **iCloud** or **Google Drive**.
 
 ### In Cursor (no terminal)
 
-1. Open the **RemoteCode** view in the activity bar (cloud sidebar icon).
+1. Open the **RemotePromptCode** view in the activity bar (cloud sidebar icon).
 2. Use the **Cloud Connection** panel to connect iCloud or Google Drive, or log out.
-3. Or run **RemoteCode: Open Cloud Settings** / **RemoteCode: Connect Cloud Storage** from the Command Palette (`Cmd+Shift+P`).
+3. Or run **RemotePromptCode: Open Cloud Settings** / **RemotePromptCode: Connect Cloud Storage** from the Command Palette (`Cmd+Shift+P`).
 
-On first launch, RemoteCode also prompts you to open Cloud Settings if nothing is connected yet.
+On first launch, RemotePromptCode also prompts you to open Cloud Settings if nothing is connected yet.
 
 Only one provider can be active at a time. Log out before switching providers or accounts.
 
-### CLI (optional)
-
-```bash
-node scripts/cloud-connection.mjs status
-node scripts/cloud-connection.mjs connect-icloud
-node scripts/cloud-connection.mjs connect-google
-node scripts/cloud-connection.mjs logout
-```
-
-Use `/connect-cloud` in Cursor chat for the guided connect flow.
-
-Connection state is stored in `~/.remotecode/cloud-connection.json` (derived from `APP_SLUG` in `shared/constants.mjs`).
 
 ## Project cloud folders
 
@@ -37,7 +38,7 @@ On macOS with iCloud, folders sync through the shared **RemoteCode mobile iCloud
 
 `RemoteCode/<machine_name>/<project_folder>`
 
-On startup (and after connecting cloud storage), RemoteCode:
+On startup (and after connecting cloud storage), RemotePromptCode:
 
 1. Provisions a cloud folder for each open workspace project
 2. Writes `account.json` in `RemoteCode/<machine_name>/` with Cursor budget and on-demand usage stats
@@ -50,13 +51,6 @@ Project folders are refreshed when you start an Agent session or send a prompt (
 - Google Drive uses the desktop sync folder, or the Drive API when `accessToken` is stored
 - Illegal filename characters are stripped from every path segment
 
-## Local development
-
-1. Symlink or copy this folder to `~/.cursor/plugins/local/RemoteCode` (plugin name matches `APP_NAME` in `shared/constants.mjs`)
-2. Reload the Cursor window
-3. Connect a cloud provider before using plugin features
-
-When developing inside the RemoteCode monorepo, `npm run sync-shared` copies `../shared/constants.mjs` into this repo. In a standalone checkout, `shared/constants.mjs` is committed here.
 
 ## Package with vsce
 
@@ -65,10 +59,10 @@ npm install
 npm run package
 ```
 
-Produces `remotecode-<version>.vsix`. Install in Cursor:
+Produces `remotepromptcode-<version>.vsix`. Install in Cursor:
 
 ```bash
-cursor --install-extension remotecode-0.3.0.vsix
+cursor --install-extension remotepromptcode-0.3.0.vsix
 ```
 
 Or use **Extensions: Install from VSIX** in the command palette.
@@ -77,7 +71,7 @@ Or use **Extensions: Install from VSIX** in the command palette.
 
 The VSIX does not declare Cursor proposed APIs (avoids install warnings). Hooks still work if Cursor loads the plugin bundle:
 
-1. **Recommended:** symlink the installed extension (or this repo) to `~/.cursor/plugins/local/RemoteCode`, then reload the window.
+1. **Recommended:** symlink the installed extension (or this repo) to `~/.cursor/plugins/local/RemotePromptCode`, then reload the window.
 2. **Extension development:** open this folder and press F5 (Extension Development Host).
 
 The Cloud Connection panel and task monitor work without hooks; hooks add cloud-folder provisioning on session start and prompt submit.

@@ -16,8 +16,8 @@ fi
 cat <<'EOF'
 {
   "permission": "deny",
-  "user_message": "RemoteCode is disabled until you connect iCloud or Google Drive. Open the RemoteCode sidebar → Cloud Connection, or run RemoteCode: Open Cloud Settings from the Command Palette.",
-  "agent_message": "Cloud connection is required. Ask the user to open RemoteCode → Cloud Connection in the activity bar, run RemoteCode: Open Cloud Settings, or use /connect-cloud. Only one provider may be active at a time; log out before switching."
+  "user_message": "RemotePromptCode is disabled until you connect iCloud or Google Drive. Open the RemotePromptCode sidebar → Cloud Connection, or run RemotePromptCode: Open Cloud Settings from the Command Palette.",
+  "agent_message": "Cloud connection is required. Ask the user to open RemotePromptCode → Cloud Connection in the activity bar, run RemotePromptCode: Open Cloud Settings, or use /connect-cloud. Only one provider may be active at a time; log out before switching."
 }
 EOF
 exit 2

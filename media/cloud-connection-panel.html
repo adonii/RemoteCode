@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; trusted-types remotecodeHtml default; require-trusted-types-for 'script';"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; trusted-types remotepromptcodeHtml default; require-trusted-types-for 'script';"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RemoteCode Cloud Connection</title>
+    <title>RemotePromptCode Cloud Connection</title>
     <style>
       * {
         box-sizing: border-box;
@@ -588,9 +588,12 @@
     </style>
   </head>
   <body>
-    <h1>Cloud connection</h1>
+    <h1>RemotePromptCode</h1>
     <p class="subtitle">
-      Connect one cloud provider so RemoteCode can sync project folders to your devices.
+      Walking out your dog? No problem. You still can code.
+    </p>
+    <p class="detail" style="margin: 0 0 16px">
+      Connect one cloud provider so RemotePromptCode can sync project folders to your devices.
     </p>
 
     <section class="card" id="settings-card">
@@ -600,14 +603,14 @@
         <span>Prevent machine from sleeping</span>
       </label>
       <p class="hint" id="prevent-sleep-hint">
-        Keeps this Mac awake while Cursor is open and RemoteCode is running.
+        Keeps this Mac awake while Cursor is open and RemotePromptCode is running.
       </p>
       <label class="field-row" for="max-parallel-tasks">
         <span>Max tasks running in parallel</span>
         <input id="max-parallel-tasks" type="number" min="1" max="20" step="1" />
       </label>
       <p class="hint" id="max-parallel-hint">
-        RemoteCode auto-starts queued tasks up to this many at once.
+        RemotePromptCode auto-starts queued tasks up to this many at once.
       </p>
       <label class="checkbox-row" for="inject-active-context">
         <input id="inject-active-context" type="checkbox" />
@@ -630,7 +633,7 @@
       <h2>Connection</h2>
       <span class="status-pill disconnected" id="status-pill">Not connected</span>
       <p class="detail" id="status-detail">
-        RemoteCode stays disabled until iCloud or Google Drive is connected.
+        RemotePromptCode stays disabled until iCloud or Google Drive is connected.
       </p>
       <div class="actions hidden" id="connection-actions">
         <button class="secondary" id="logout-btn" type="button">Log out</button>
@@ -640,7 +643,7 @@
     <section class="card hidden" id="folders-card">
       <h2>iCloud folders</h2>
       <p class="detail" id="folders-intro">
-        On connect and startup, RemoteCode provisions a cloud folder for each open workspace project and writes account.json with Cursor usage stats.
+        On connect and startup, RemotePromptCode provisions a cloud folder for each open workspace project and writes account.json with Cursor usage stats.
       </p>
       <div class="path" id="folders-path"></div>
       <p class="detail" id="folders-status"></p>
@@ -691,7 +694,7 @@
       let htmlTrustedPolicy = null;
       if (typeof trustedTypes !== 'undefined' && trustedTypes.createPolicy) {
         try {
-          htmlTrustedPolicy = trustedTypes.createPolicy('remotecodeHtml', {
+          htmlTrustedPolicy = trustedTypes.createPolicy('remotepromptcodeHtml', {
             createHTML: input => input,
           });
         } catch {
@@ -700,7 +703,7 @@
               createHTML: input => input,
             });
           } catch (error) {
-            console.warn('RemoteCode: unable to create HTML trusted type policy', error);
+            console.warn('RemotePromptCode: unable to create HTML trusted type policy', error);
           }
         }
       }
@@ -720,9 +723,9 @@
         element.insertAdjacentHTML(position, toTrustedHtml(html));
       }
 
-      window.remoteCodeQueueAction =
-        window.remoteCodeQueueAction ??
-        function remoteCodeQueueAction(event) {
+      window.remotePromptCodeQueueAction =
+        window.remotePromptCodeQueueAction ??
+        function remotePromptCodeQueueAction(event) {
           const button = event.target.closest('[data-action]');
           if (!(button instanceof HTMLButtonElement) || button.disabled) {
             return;
@@ -736,10 +739,10 @@
           }
 
           const actionKey = `${action}:${projectKey}:${taskFolderName}`;
-          if (window.__remoteCodeTaskActionInFlight === actionKey) {
+          if (window.__remotePromptCodeTaskActionInFlight === actionKey) {
             return;
           }
-          window.__remoteCodeTaskActionInFlight = actionKey;
+          window.__remotePromptCodeTaskActionInFlight = actionKey;
 
           event.preventDefault();
           event.stopPropagation();
@@ -793,20 +796,20 @@
       let lastConversionsSnapshot = '';
       let lastTaskActivitySnapshot = '';
       let lastApiDebugSnapshot = '';
-      let lastKnownConversions = [];
-      let lastKnownTasks = [];
-      let lastKnownApiDebugLog = [];
       let lastQueueSectionsSnapshot = '';
+      let currentProjectFolder = null;
       const conversionItemElements = new Map();
       const taskActivityItemElements = new Map();
       const apiDebugItemElements = new Map();
 
-      function resolveOptimisticItems(items, lastKnown) {
-        const nextItems = Array.isArray(items) ? items : [];
-        if (nextItems.length > 0) {
-          return nextItems;
-        }
-        return lastKnown.length > 0 ? lastKnown : nextItems;
+      function resetQueuePanelState() {
+        lastQueueSectionsSnapshot = '';
+        lastTaskActivitySnapshot = '';
+        lastConversionsSnapshot = '';
+        lastApiDebugSnapshot = '';
+        conversionItemElements.clear();
+        taskActivityItemElements.clear();
+        apiDebugItemElements.clear();
       }
 
       function renderHtmlFragment(html) {
@@ -878,9 +881,6 @@
         lastConversionsSnapshot = '';
         lastTaskActivitySnapshot = '';
         lastApiDebugSnapshot = '';
-        lastKnownConversions = [];
-        lastKnownTasks = [];
-        lastKnownApiDebugLog = [];
         conversionItemElements.clear();
         taskActivityItemElements.clear();
       }
@@ -901,7 +901,7 @@
           button.disabled = busy;
         });
         if (!busy) {
-          window.__remoteCodeTaskActionInFlight = null;
+          window.__remotePromptCodeTaskActionInFlight = null;
         }
       }
 
@@ -981,15 +981,12 @@
       }
 
       function renderConversions(conversions) {
-        const items = resolveOptimisticItems(conversions, lastKnownConversions);
+        const items = Array.isArray(conversions) ? conversions : [];
         const snapshot = JSON.stringify(items);
         if (snapshot === lastConversionsSnapshot) {
           return;
         }
         lastConversionsSnapshot = snapshot;
-        if (items.length > 0) {
-          lastKnownConversions = items;
-        }
 
         mergeKeyedPanelItems(conversionsPanel, items, {
           itemMap: conversionItemElements,
@@ -1223,17 +1220,20 @@
         });
       }
 
-      function renderQueueSections(queue) {
-        const tasks = resolveOptimisticItems(queue.tasks ?? [], lastKnownTasks);
-        const conversions = resolveOptimisticItems(queue.conversions ?? [], lastKnownConversions);
-        const conversionsById = new Map(conversions.map(entry => [entry.id, entry]));
+      function tasksForCurrentProject(tasks, projectFolder) {
+        if (!projectFolder) {
+          return Array.isArray(tasks) ? tasks : [];
+        }
 
-        if (tasks.length > 0) {
-          lastKnownTasks = tasks;
-        }
-        if (conversions.length > 0) {
-          lastKnownConversions = conversions;
-        }
+        return (Array.isArray(tasks) ? tasks : []).filter(
+          task => task.projectFolder === projectFolder,
+        );
+      }
+
+      function renderQueueSections(queue, projectFolder) {
+        const tasks = tasksForCurrentProject(queue.tasks, projectFolder);
+        const conversions = Array.isArray(queue.conversions) ? queue.conversions : [];
+        const conversionsById = new Map(conversions.map(entry => [entry.id, entry]));
 
         const stoppingTasks = tasks.filter(task => task.state === 'stop' || task.state === 'stopping');
         const runningTasks = tasks.filter(task => task.state === 'running');
@@ -1328,37 +1328,28 @@
       }
 
       function renderTaskActivity(tasks) {
-        const items = resolveOptimisticItems(tasks, lastKnownTasks);
+        const items = Array.isArray(tasks) ? tasks : [];
         const snapshot = JSON.stringify(items);
         if (snapshot === lastTaskActivitySnapshot) {
           return;
         }
         lastTaskActivitySnapshot = snapshot;
-        if (items.length > 0) {
-          lastKnownTasks = items;
-        }
 
         mergeKeyedPanelItems(taskActivityPanel, items, {
           itemMap: taskActivityItemElements,
-          getKey: task => `${task.projectFolder}:${task.taskFolderName}`,
+          getKey: task => `${task.projectKey}:${task.taskFolderName}`,
           renderItemHtml: renderTaskActivityItemHtml,
           sectionLabelHtml: '<div class="section-label">Active tasks</div>',
         });
       }
 
       function renderApiDebug(apiDebugLog) {
-        const entries = resolveOptimisticItems(
-          Array.isArray(apiDebugLog) ? apiDebugLog.slice(0, 6) : [],
-          lastKnownApiDebugLog,
-        );
+        const entries = Array.isArray(apiDebugLog) ? apiDebugLog.slice(0, 6) : [];
         const snapshot = JSON.stringify(entries);
         if (snapshot === lastApiDebugSnapshot) {
           return;
         }
         lastApiDebugSnapshot = snapshot;
-        if (entries.length > 0) {
-          lastKnownApiDebugLog = entries;
-        }
 
         if (entries.length === 0) {
           apiDebugPanel.classList.add('hidden');
@@ -1419,11 +1410,11 @@
         if (state.platform === 'darwin') {
           preventSleepCheckbox.disabled = false;
           preventSleepHint.textContent =
-            'Keeps this Mac awake while Cursor is open and RemoteCode is running.';
+            'Keeps this Mac awake while Cursor is open and RemotePromptCode is running.';
         } else if (state.platform === 'linux') {
           preventSleepCheckbox.disabled = false;
           preventSleepHint.textContent =
-            'Uses systemd-inhibit on Linux while Cursor is open and RemoteCode is running.';
+            'Uses systemd-inhibit on Linux while Cursor is open and RemotePromptCode is running.';
         } else {
           preventSleepCheckbox.disabled = true;
           preventSleepHint.textContent =
@@ -1454,26 +1445,31 @@
           googleCard.classList.add('hidden');
 
           if (state.folders?.connected) {
+            const nextProjectFolder = state.folders.projectFolder ?? null;
+            if (nextProjectFolder !== currentProjectFolder) {
+              currentProjectFolder = nextProjectFolder;
+              resetQueuePanelState();
+            }
+
             foldersCard.classList.remove('hidden');
             foldersCard.querySelector('h2').textContent =
               state.folders.provider === 'icloud' ? 'iCloud folders' : 'Cloud folders';
-            foldersPath.textContent =
-              state.folders.finderPath || state.folders.workspaceRelativePath;
+            foldersPath.textContent = state.folders.workspaceRelativePath;
 
-            if (state.folders.machineExists || state.folders.workspaceExists) {
-              foldersStatus.textContent = `${state.folders.projectFolderCount} project folder(s) provisioned. account.json is refreshed on startup and sync.`;
+            if (state.folders.workspaceExists) {
+              foldersStatus.textContent = `Project cloud folder: ${state.folders.projectFolder}`;
               provisionBtn.textContent = 'Sync folders & usage';
               revealBtn.disabled = false;
             } else {
               foldersStatus.textContent =
-                'Machine folder not found yet. Click Sync folders & usage to provision workspace project folders and write account.json.';
+                'Project cloud folder not provisioned yet. Click Sync folders & usage.';
               provisionBtn.textContent = 'Sync folders & usage';
               revealBtn.disabled = true;
             }
 
             const queue = state.queueStats ?? {};
 
-            renderQueueSections(queue);
+            renderQueueSections(queue, state.folders.projectFolder);
             renderApiDebug(queue.apiDebugLog ?? []);
           } else {
             foldersCard.classList.add('hidden');
@@ -1487,7 +1483,7 @@
         statusPill.textContent = 'Not connected';
         statusPill.className = 'status-pill disconnected';
         statusDetail.textContent =
-          'RemoteCode stays disabled until iCloud or Google Drive is connected.';
+          'RemotePromptCode stays disabled until iCloud or Google Drive is connected.';
         connectionActions.classList.add('hidden');
         icloudCard.classList.remove('hidden');
         googleCard.classList.remove('hidden');
@@ -1496,24 +1492,21 @@
         }
       }
 
-      if (!document.documentElement.dataset.remotecodePanelInit) {
-        document.documentElement.dataset.remotecodePanelInit = '1';
+      window.addEventListener('message', event => {
+        const message = event.data;
+        if (message.type === 'state') {
+          renderState(message);
+        }
+        if (message.type === 'error') {
+          showError(message.message);
+          setBusy(false);
+        }
+        if (message.type === 'busy') {
+          setBusy(Boolean(message.value));
+        }
+      });
 
-        window.addEventListener('message', event => {
-          const message = event.data;
-          if (message.type === 'state') {
-            renderState(message);
-          }
-          if (message.type === 'error') {
-            showError(message.message);
-            setBusy(false);
-          }
-          if (message.type === 'busy') {
-            setBusy(Boolean(message.value));
-          }
-        });
-
-        icloudConnectBtn.addEventListener('click', () => {
+      icloudConnectBtn.addEventListener('click', () => {
           showError('');
           setBusy(true);
           vscode.postMessage({
@@ -1555,7 +1548,7 @@
           vscode.postMessage({ type: 'refreshDebug' });
         });
 
-        foldersCard.addEventListener('click', remoteCodeQueueAction, true);
+        foldersCard.addEventListener('click', remotePromptCodeQueueAction, true);
 
         preventSleepCheckbox.addEventListener('change', () => {
           if (preventSleepUpdating) {
@@ -1640,8 +1633,7 @@
           });
         });
 
-        vscode.postMessage({ type: 'ready' });
-      }
+      vscode.postMessage({ type: 'ready' });
     </script>
   </body>
 </html>
