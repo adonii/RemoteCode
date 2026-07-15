@@ -1,0 +1,193 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  color: #c5ccd6;
+  background: #0f1115;
+}
+
+a {
+  color: #60a5fa;
+}
+
+a:hover {
+  color: #93c5fd;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 20px 48px;
+}
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+  margin-bottom: 40px;
+}
+
+.app-icon {
+  width: 96px;
+  height: 96px;
+  border-radius: 22px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(1.75rem, 5vw, 2.25rem);
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  margin: 0;
+  max-width: 36ch;
+  color: #a8b0bd;
+  font-size: 1.05rem;
+}
+
+section {
+  margin-bottom: 36px;
+}
+
+section h2 {
+  margin: 0 0 12px;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+section p {
+  margin: 0 0 12px;
+}
+
+.card {
+  background: #1a1f28;
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.contact-email {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 1.125rem;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.faq-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.faq-list li {
+  padding: 16px 0;
+  border-bottom: 1px solid #2a3140;
+}
+
+.faq-list li:first-child {
+  padding-top: 0;
+}
+
+.faq-list li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.faq-list h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.faq-list p {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #a8b0bd;
+}
+
+.faq-list code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.875em;
+  color: #e2e8f0;
+  background: #0f1115;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.privacy-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+footer {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid #2a3140;
+  text-align: center;
+  font-size: 0.875rem;
+  color: #7d8796;
+}
+
+footer a {
+  color: #a8b0bd;
+}
+
+.policy-page h1 {
+  margin: 0 0 8px;
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  color: #fff;
+}
+
+.policy-page .updated {
+  margin: 0 0 28px;
+  font-size: 0.875rem;
+  color: #7d8796;
+}
+
+.policy-page h2 {
+  margin: 28px 0 10px;
+  font-size: 1.125rem;
+  color: #fff;
+}
+
+.policy-page ul {
+  margin: 0 0 12px;
+  padding-left: 1.25rem;
+}
+
+.policy-page li {
+  margin-bottom: 6px;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 24px;
+  font-size: 0.95rem;
+}

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="RemoteCode support — help connecting iCloud, finding projects, and sending remote coding tasks to your IDE.">
+  <title>RemoteCode Support</title>
+  <link rel="icon" href="assets/app-icon-180.png" type="image/png">
+  <link rel="apple-touch-icon" href="assets/app-icon-180.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <img
+        class="app-icon"
+        src="assets/app-icon-180.png"
+        width="180"
+        height="180"
+        alt="RemoteCode app icon">
+      <h1>RemoteCode</h1>
+      <p class="tagline">
+        Send coding tasks from your iPhone or Apple Watch to Cursor on your Mac.
+        Your data stays in your own iCloud — no third-party servers.
+      </p>
+    </header>
+
+    <section aria-labelledby="contact-heading">
+      <h2 id="contact-heading">Contact support</h2>
+      <div class="card">
+        <p>
+          Questions, bug reports, or account help? Email us and we will get back to you.
+        </p>
+        <a class="contact-email" href="mailto:569460@gmail.com?subject=RemoteCode%20Support">
+          569460@gmail.com
+        </a>
+      </div>
+    </section>
+
+    <section aria-labelledby="faq-heading">
+      <h2 id="faq-heading">Frequently asked questions</h2>
+      <ul class="faq-list card">
+        <li>
+          <h3>How do I sign in or connect?</h3>
+          <p>
+            Open <strong>Settings</strong> in RemoteCode and tap <strong>Connect iCloud</strong>.
+            On iPhone, the app uses the Apple ID already signed in on your device.
+            Make sure iCloud Drive is enabled in Settings &gt; [your name] &gt; iCloud.
+          </p>
+        </li>
+        <li>
+          <h3>Why don&rsquo;t I see any machines or projects?</h3>
+          <p>
+            Install the RemotePromptCode plugin in Cursor on your Mac, connect the same iCloud account,
+            and open a workspace. RemoteCode creates project folders under
+            <code>RemoteCode/&lt;machine_name&gt;/</code> in iCloud Drive.
+          </p>
+        </li>
+        <li>
+          <h3>How do I send a task to my IDE?</h3>
+          <p>
+            From the home screen, open a machine, choose a project, then type or dictate your task.
+            Cursor picks it up from your shared iCloud folder and runs it on your computer.
+          </p>
+        </li>
+        <li>
+          <h3>Voice recording or speech recognition isn&rsquo;t working</h3>
+          <p>
+            Allow Microphone and Speech Recognition when RemoteCode asks.
+            You can change permissions anytime in iPhone Settings &gt; RemoteCode.
+          </p>
+        </li>
+        <li>
+          <h3>How do I switch iCloud accounts?</h3>
+          <p>
+            In RemoteCode Settings, tap <strong>Log out</strong>, then connect again.
+            Only one cloud provider can be active at a time.
+          </p>
+        </li>
+        <li>
+          <h3>iCloud sync looks stuck</h3>
+          <p>
+            Confirm you are signed into iCloud, iCloud Drive is on, and you have network access.
+            Use the banner&rsquo;s <strong>Check again</strong> button, or open iCloud settings from the app.
+          </p>
+        </li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="privacy-heading">
+      <h2 id="privacy-heading">Privacy</h2>
+      <div class="card">
+        <p>
+          RemoteCode does not run its own backend for your tasks. Coding prompts and project files
+          sync through your personal iCloud account.
+        </p>
+        <p>
+          <a class="privacy-link" href="privacy.html">Read the Privacy Policy &rarr;</a>
+        </p>
+      </div>
+    </section>
+
+    <footer>
+      <p>&copy; 2026 RemoteCode. All rights reserved.</p>
+      <p>
+        <a href="https://github.com/adonii/RemoteCode">GitHub</a>
+      </p>
+    </footer>
+  </main>
+</body>
+</html>
